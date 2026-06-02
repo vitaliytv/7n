@@ -1,0 +1,41 @@
+npm/getw.js
+  s_829ef051c19843::t_997999cc1a2c20 75-85
+  s_829ef051c19843::t_e5d01d7021cb16 2
+  s_829ef051c19843::t_00cce7e60151ed 1,3-74,86
+npm/package.json
+  s_829ef051c19843::t_f91cc702801952 28
+npm/README.md
+  s_829ef051c19843::t_94590c97965ce0 21-28
+package.json
+  s_829ef051c19843::t_c32a46586faff3 12
+.cspell.json
+  s_829ef051c19843::t_fea0a833a7fd90 17
+npm/bin/n-7.js
+  s_829ef051c19843::t_a9ae6b1ebe5216 4
+npm/index.js
+  s_829ef051c19843::t_87b00d0887a084 43-44,46,48
+  s_829ef051c19843::t_7a5c98f156512c 4-5
+  s_829ef051c19843::t_709452feced6e3 13
+  s_829ef051c19843::t_047126d6f238bd 66,68-69
+  s_829ef051c19843::t_26449f550ec709 67
+npm/tests/index.test.mjs
+  s_829ef051c19843::t_4168acd755cb6c 33,35,39,41,45,47,51-63,65
+npm/types/index.d.ts
+  s_829ef051c19843::t_b93b651d8dae83 15-16,20-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "68a14a13af4c68ca17c85c2dbc05c23ce88b7f1f",
+  "prompts": {},
+  "sessions": {
+    "s_829ef051c19843": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa9d67c6-9d30-4352-84d4-ba0ff29eafee",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
