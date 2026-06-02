@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import { getw } from './getw.js'
+
 const HELP = `@7n/7 — CLI
 
 Використання:
@@ -8,6 +10,7 @@ const HELP = `@7n/7 — CLI
 
 Команди:
   greet [ім'я]    Привітатися (типове ім'я — «світ»)
+  getw            Перенести зміни з обраного git-worktree у поточну гілку (fzf) і прибрати worktree
   version         Показати версію
   help            Показати цю довідку
 
@@ -37,11 +40,12 @@ export function greet(name = 'світ') {
 /**
  * Точка входу CLI.
  * @param {string[]} argv - аргументи без `node <script>`
- * @param {{ log?: (message: string) => void }} [io] - інжектиться у тестах
- * @returns {number} exit code
+ * @param {{ log?: (message: string) => void, getw?: () => Promise<number> }} [io] - інжектиться у тестах
+ * @returns {Promise<number>} exit code
  */
-export function run(argv, io = {}) {
+export async function run(argv, io = {}) {
   const log = io.log ?? (message => process.stdout.write(`${message}\n`))
+  const runGetw = io.getw ?? getw
   const [command, ...rest] = argv
 
   if (command === '-v' || command === '--version' || command === 'version') {
@@ -57,6 +61,10 @@ export function run(argv, io = {}) {
   if (command === 'greet') {
     log(greet(rest[0]))
     return 0
+  }
+
+  if (command === 'getw') {
+    return await runGetw()
   }
 
   log(`Невідома команда: ${command}\n\n${HELP}`)

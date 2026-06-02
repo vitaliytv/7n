@@ -12,9 +12,10 @@ export function greet(name?: string): string;
 /**
  * Точка входу CLI.
  * @param {string[]} argv - аргументи без `node <script>`
- * @param {{ log?: (message: string) => void }} [io] - інжектиться у тестах
- * @returns {number} exit code
+ * @param {{ log?: (message: string) => void, getw?: () => Promise<number> }} [io] - інжектиться у тестах
+ * @returns {Promise<number>} exit code
  */
 export function run(argv: string[], io?: {
     log?: (message: string) => void;
-}): number;
+    getw?: () => Promise<number>;
+}): Promise<number>;
