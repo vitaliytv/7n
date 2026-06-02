@@ -1,0 +1,18 @@
+{
+  "version": "0.2",
+  "language": "en,uk,ru-ru,nitra",
+  "import": ["@nitra/cspell-dict"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/vscode-extension/**",
+    "**/.git/**",
+    ".vscode",
+    "report",
+    "**/reports/stryker/**",
+    "*.svg",
+    "**/k8s/**/*.yaml",
+    "docs/adr/**",
+    "**/dist/**"
+  ],
+  "words": ["nitralabs", "vitaliytv"]
+}
