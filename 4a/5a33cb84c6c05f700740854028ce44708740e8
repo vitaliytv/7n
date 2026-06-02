@@ -1,0 +1,221 @@
+.claude/commands/n-worktree.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.trufflehog-exclude
+  s_829ef051c19843::t_5725bb6b956e58 1-6
+npm/tsconfig.emit-types.json
+  s_829ef051c19843::t_4a284fa10b4777 1-14,16-17
+  s_829ef051c19843::t_4d20b0419898e0 15
+.cspell.json
+  s_829ef051c19843::t_63bc827181900c 1-18
+.markdownlint-cli2.jsonc
+  s_829ef051c19843::t_575c5e3a5bec0f 1-11
+.claude/hooks/capture-decisions.sh
+  s_829ef051c19843::t_e3fe1da353b1fc 1-235
+.cursor/skills/n-coverage-fix/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-162
+eslint.config.js
+  s_829ef051c19843::t_0f94ec14b43548 1-40
+npm/vitest.config.js
+  s_829ef051c19843::t_dfddad0225715a 1-15
+.claude/commands/n-lint.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.claude/commands/n-taze.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.n-cursor.json
+  s_829ef051c19843::t_e3fe1da353b1fc 24,30
+  s_829ef051c19843::t_8afd076bcf91f7 1-23,25-29,31-35
+.cursor/rules/n-flow.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-127
+.cursor/skills/n-lint/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-138
+.cursor/skills/n-worktree/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-38
+.cursor/rules/n-ga.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-317
+.github/workflows/lint-text.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-61
+npm/tests/index.test.mjs
+  s_829ef051c19843::t_52efeef1760a63 1-2,4,16-27,29-56
+  s_829ef051c19843::t_b354b615f9f869 3
+  s_829ef051c19843::t_89edd1e54c126a 5-15,28
+.github/actions/setup-bun-deps/action.yml
+  s_829ef051c19843::t_e3fe1da353b1fc 1-27
+.claude/commands/n-llm-patch.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.cursor/skills/n-fix/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-70
+npm/stryker.config.mjs
+  s_829ef051c19843::t_1e8cd5c0f00844 17
+  s_829ef051c19843::t_513ee17d7b96a9 1-16,18
+.cursor/rules/n-ci4.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-383
+.pi/skills/n-taze/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.cursor/rules/n-npm-module.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-131
+bunfig.toml
+  s_829ef051c19843::t_d707900e1537ba 1-2
+.pi/skills/n-lint/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.claude/commands/n-adr-normalize.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.cursor/rules/n-js-run.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-302
+knip.json
+  s_829ef051c19843::t_1c8094c3bd3ef1 16
+  s_829ef051c19843::t_d855b0922d66c8 5
+  s_829ef051c19843::t_d623930e9ae74c 1-4,6-15,17-19,39
+  s_829ef051c19843::t_94a6cee9b29c80 20-38
+.cursor/rules/n-changelog.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-105
+.jscpd.json
+  s_829ef051c19843::t_585b3d631decc7 1-7
+.github/workflows/clean-merged-branch.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-38
+.cursor/rules/n-text.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-420
+.github/workflows/clean-ga-workflows.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-26
+.claude/commands/n-fix.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.cursor/rules/n-worktree.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-48
+.claude/hooks/normalize-decisions.sh
+  s_829ef051c19843::t_e3fe1da353b1fc 1-494
+.github/workflows/lint-js.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-44
+npm/package.json
+  s_829ef051c19843::t_6cab9e3a8d973b 23,27
+  s_829ef051c19843::t_7882d74ccc50ae 1-22,24-26,28-44
+.cursor/hooks.json
+  s_829ef051c19843::t_e3fe1da353b1fc 1-15
+.pi/skills/n-worktree/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.marksman.toml
+  s_829ef051c19843::t_d623930e9ae74c 1-27
+readme.MD
+  s_829ef051c19843::t_ed845fe192335c 1-12
+.cursor/skills/n-taze/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-128
+.pi/extensions/n-cursor-adr/index.ts
+  s_829ef051c19843::t_e3fe1da353b1fc 1-98
+.cursor/skills/n-adr-normalize/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-93
+.cursor/skills/n-publish-telegram/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-94
+.pi/extensions/n-cursor-adr/tsconfig.json
+  s_829ef051c19843::t_e3fe1da353b1fc 1-17
+.claude/commands/n-fix-tests.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.pi/skills/n-publish-telegram/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.oxfmtrc.json
+  s_829ef051c19843::t_ea5c99d114203d 1,15-17,19,21
+  s_829ef051c19843::t_9446540f156379 2-14,18,20
+.cursor/skills/n-fix-tests/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-140
+.cursor/rules/n-js-lint-ci.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-45
+.pi/skills/n-llm-patch/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.cursor/skills/n-llm-patch/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-238
+.claude/commands/n-start-check.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.github/workflows/npm-publish.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-34
+.oxlintrc.json
+  s_829ef051c19843::t_5725bb6b956e58 1-400
+.claude/settings.json
+  s_829ef051c19843::t_e3fe1da353b1fc 1-50
+CLAUDE.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-54
+.gitignore
+  s_829ef051c19843::t_2a4d4cef3a189d 1-17
+.cursor/rules/n-adr.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-174
+npm/bin/n-7.js
+  s_829ef051c19843::t_29da068602e6f1 4
+  s_829ef051c19843::t_5df19cde77c274 1,3
+  s_829ef051c19843::t_9d012f2ff6c154 2
+.claude/commands/n-publish-telegram.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.cursor/rules/n-test.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-226
+.claude/hooks/lib/tooling-only.sh
+  s_829ef051c19843::t_e3fe1da353b1fc 1-61
+.cursor/skills/n-start-check/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-100
+.pi/skills/n-start-check/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.cursor/rules/n-security.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-114
+.vscode/extensions.json
+  s_829ef051c19843::t_2d8c43963d7136 1-10
+.v8rignore
+  s_829ef051c19843::t_78568c39854e34 1-3
+hk.pkl
+  s_829ef051c19843::t_794f8e32056ec0 1-6,8-25
+  s_829ef051c19843::t_db5c409807f4d3 7
+AGENTS.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-51,53-78
+  s_829ef051c19843::t_7bfae1c8e44c53 52
+package.json
+  s_829ef051c19843::t_1b7ff3cb3a9fc8 12
+  s_829ef051c19843::t_5b578797706675 14
+  s_829ef051c19843::t_8e8caa55b2d725 32-35
+  s_829ef051c19843::t_342e662c80f9c6 1-11,13,15-31,36
+.pi/skills/n-adr-normalize/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+npm/types/index.d.ts
+  s_829ef051c19843::t_1359054645ed64 1-2,4-8,10-20
+  s_829ef051c19843::t_2153a8f3cedefa 3,9
+.cursor/rules/n-js-lint.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-277
+.pi/skills/n-coverage-fix/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.pi/skills/n-fix-tests/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.github/workflows/lint-security.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-31
+npm/README.md
+  s_829ef051c19843::t_acd162cbc59505 1-27,29
+  s_829ef051c19843::t_d12e5bc8363963 28
+.pi/skills/n-fix/SKILL.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-9
+.github/workflows/git-ai.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-30
+npm/index.js
+  s_829ef051c19843::t_228c144668891c 21-24
+  s_829ef051c19843::t_608866b51d1684 31
+.vscode/settings.json
+  s_829ef051c19843::t_79b7946737c823 1-14
+.github/workflows/lint-ga.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-41
+.cursor/rules/n-feedback.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-63
+.claude/commands/n-coverage-fix.md
+  s_829ef051c19843::t_e3fe1da353b1fc 1-8
+.cursor/rules/n-bun.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-87
+.cursor/rules/n-image-compress.mdc
+  s_829ef051c19843::t_e3fe1da353b1fc 1-46
+.github/zizmor.yml
+  s_829ef051c19843::t_5725bb6b956e58 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4a5a33cb84c6c05f700740854028ce44708740e8",
+  "prompts": {},
+  "sessions": {
+    "s_829ef051c19843": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa9d67c6-9d30-4352-84d4-ba0ff29eafee",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
