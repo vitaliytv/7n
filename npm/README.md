@@ -24,7 +24,7 @@ n-7 --help
 npx @7n/7 getw
 ```
 
-Інтерактивно (через [`fzf`](https://github.com/junegunn/fzf)) обирає git-worktree з-під `.worktrees/`, переносить його зміни у **поточну** гілку як unstaged, після чого видаляє той worktree і його гілку. Потребує `zsh`, `git` і `fzf` на машині.
+Інтерактивно (через [`fzf`](https://github.com/junegunn/fzf)) обирає git-worktree з-під `.worktrees/`, переносить його зміни у **поточну** гілку як unstaged, після чого видаляє той worktree і його гілку. Потребує `zsh` та `git`; якщо `fzf` відсутній — автоматично ставить його через `brew install fzf` (потрібен Homebrew).
 
 ## Програмний API
 

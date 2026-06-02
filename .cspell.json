@@ -14,5 +14,5 @@
     "docs/adr/**",
     "**/dist/**"
   ],
-  "words": ["fzf", "getw", "nitralabs", "ворктрі", "vitaliytv"]
+  "words": ["fzf", "getw", "Homebrew", "nitralabs", "ворктрі", "vitaliytv"]
 }

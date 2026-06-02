@@ -22,6 +22,18 @@ getw() {
         return 0
     fi
 
+    if ! command -v fzf > /dev/null 2>&1; then
+        echo "🔍 fzf не встановлено — ставлю через Homebrew (brew install fzf)..."
+        if ! command -v brew > /dev/null 2>&1; then
+            echo "❌ Homebrew (brew) не знайдено. Встанови fzf вручну: https://github.com/junegunn/fzf"
+            return 1
+        fi
+        if ! brew install fzf; then
+            echo "❌ Не вдалося встановити fzf через brew."
+            return 1
+        fi
+    fi
+
     local selected_wt_line=$(echo "❌_ВІДМІНА_\\n$wt_list" | fzf --delimiter="/" --with-nth="-1" --prompt="Оберіть worktree для перенесення змін: ")
 
     if [[ -z "$selected_wt_line" || "$selected_wt_line" == *"❌_ВІДМІНА_"* ]]; then
@@ -68,7 +80,8 @@ getw
 
 /**
  * Інтерактивно переносить зміни з обраного git-worktree у поточну гілку (вибір через fzf)
- * і прибирає цей worktree. Потребує zsh, git і fzf на машині користувача.
+ * і прибирає цей worktree. Потребує zsh та git; якщо fzf відсутній — ставить його через
+ * `brew install fzf` (за наявності Homebrew).
  * @param {typeof spawn} [spawnFn] - інжект `spawn` для тестів
  * @returns {Promise<number>} exit code дочірнього zsh-процесу
  */
