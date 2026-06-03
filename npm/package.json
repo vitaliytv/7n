@@ -26,6 +26,9 @@
     "CHANGELOG.md",
     "getw.js",
     "index.js",
+    "merge.js",
+    "pull.js",
+    "push.js",
     "README.md",
     "types",
     "!**/*.test.mjs"

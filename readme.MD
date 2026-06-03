@@ -1,6 +1,6 @@
-# @7n/7 — monorepo
+# @7n/n — monorepo
 
-Bun monorepo. Публікований пакет — [`@7n/7`](npm/README.md) у `npm/`.
+Bun monorepo. Публікований пакет — [`@7n/n`](npm/README.md) у `npm/`.
 
 ```bash
 bun install        # встановити залежності

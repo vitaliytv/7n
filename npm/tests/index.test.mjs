@@ -60,6 +60,52 @@ describe('run', () => {
     expect(code).toBe(0)
   })
 
+  it('pull делегує у переданий runner із назвою гілки і повертає його exit code', async () => {
+    let received
+    const code = await run(['pull', 'feature-x'], {
+      pull: branch => {
+        received = branch
+        return Promise.resolve(0)
+      }
+    })
+    expect(received).toBe('feature-x')
+    expect(code).toBe(0)
+  })
+
+  it('pull без аргументу передає undefined (поточна гілка)', async () => {
+    let received = 'unset'
+    await run(['pull'], {
+      pull: branch => {
+        received = branch
+        return Promise.resolve(0)
+      }
+    })
+    expect(received).toBeUndefined()
+  })
+
+  it('push делегує у переданий runner із назвою гілки і повертає його exit code', async () => {
+    let received
+    const code = await run(['push', 'feature-x'], {
+      push: branch => {
+        received = branch
+        return Promise.resolve(0)
+      }
+    })
+    expect(received).toBe('feature-x')
+    expect(code).toBe(0)
+  })
+
+  it('push без аргументу передає undefined (поточна гілка)', async () => {
+    let received = 'unset'
+    await run(['push'], {
+      push: branch => {
+        received = branch
+        return Promise.resolve(0)
+      }
+    })
+    expect(received).toBeUndefined()
+  })
+
   it('невідома команда повертає 1', async () => {
     const io = collector()
     expect(await run(['boom'], io)).toBe(1)

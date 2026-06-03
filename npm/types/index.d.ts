@@ -12,7 +12,7 @@ export function greet(name?: string): string
 /**
  * Точка входу CLI.
  * @param {string[]} argv - аргументи без `node <script>`
- * @param {{ log?: (message: string) => void, getw?: () => Promise<number> }} [io] - інжектиться у тестах
+ * @param {{ log?: (message: string) => void, getw?: () => Promise<number>, pull?: (branch?: string) => Promise<number>, push?: (branch?: string) => Promise<number> }} [io] - інжектиться у тестах
  * @returns {Promise<number>} exit code
  */
 export function run(
@@ -20,5 +20,7 @@ export function run(
   io?: {
     log?: (message: string) => void
     getw?: () => Promise<number>
+    pull?: (branch?: string) => Promise<number>
+    push?: (branch?: string) => Promise<number>
   }
 ): Promise<number>

@@ -18,7 +18,7 @@ const SECTIONS = Object.freeze(['Added', 'Changed', 'Fixed', 'Removed'])
 const CHANGES_DIR = '.changes'
 
 const USAGE = [
-  'Використання: n-7 ch [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>] [--message "<опис>"] [--ws <шлях>]',
+  'Використання: npx @7n/n ch [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>] [--message "<опис>"] [--ws <шлях>]',
   'Без флагів — інтерактивний режим (потрібен TTY). Задані флаги пропускають відповідний крок.'
 ].join('\n')
 
@@ -115,7 +115,7 @@ export async function collectChange(partial, io) {
 }
 
 /**
- * `n-7 ch` — інтерактивно (або з флагів) створює change-файл.
+ * `npx @7n/n ch` — інтерактивно (або з флагів) створює change-файл.
  * @param {string[]} argv аргументи після `ch`
  * @param {object} [io] інжект для тестів
  * @param {(message: string) => void} [io.log] вивід
