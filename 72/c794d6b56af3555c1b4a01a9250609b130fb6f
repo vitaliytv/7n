@@ -1,0 +1,33 @@
+npm/tests/push.test.mjs
+  s_ed9ade7b88e4be::t_7eec654212e4d1 46,50-58,65-71
+  s_ed9ade7b88e4be::t_8e9509c72469d4 47-49,59-64
+npm/push.js
+  s_ed9ade7b88e4be::t_b30c2468153a61 126-127
+  s_ed9ade7b88e4be::t_c2fb2f990949f6 14
+  s_ed9ade7b88e4be::t_18c7061bf1f272 226-229
+  s_ed9ade7b88e4be::t_6185ed1bc5b61f 15-17
+  s_ed9ade7b88e4be::t_dc6f1e5882ed0d 186-191
+  s_ed9ade7b88e4be::t_5601fbec916b91 230
+  s_ed9ade7b88e4be::t_55c67696b9ece8 117-125,128-167
+npm/README.md
+  s_ed9ade7b88e4be::t_aa3cb598d7ac0e 66-67
+  s_ed9ade7b88e4be::t_3fe0bc11cce457 70
+docs/adr/20260603-202937-команда-push-squash-коміт-автоматичний-getpull-при-дивергенц.md
+  ai_agent 1-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "72c794d6b56af3555c1b4a01a9250609b130fb6f",
+  "prompts": {},
+  "sessions": {
+    "s_ed9ade7b88e4be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d261d410-e912-4f06-8fd5-2770efae874a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
