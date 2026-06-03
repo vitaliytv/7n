@@ -1,0 +1,19 @@
+package.json
+  s_b0820c84f1a8d8::t_f4706d6d13f134 12,14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f88d57637ce006ef08e27d1479fc9bc7faa6eb39",
+  "prompts": {},
+  "sessions": {
+    "s_b0820c84f1a8d8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e8ea3-5889-7390-9b57-ae3fee93aec8",
+        "model": "gpt-5.5"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
