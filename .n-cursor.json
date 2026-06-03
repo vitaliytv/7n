@@ -18,9 +18,7 @@
     "text",
     "worktree"
   ],
-  "ignore": [
-    ".worktrees"
-  ],
+  "ignore": [".worktrees"],
   "skills": [
     "adr-normalize",
     "coverage-fix",

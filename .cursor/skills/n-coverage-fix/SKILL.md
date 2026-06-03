@@ -5,6 +5,7 @@ description: >-
 ---
 
 <!-- n-cursor:worktree:start -->
+
 > [!IMPORTANT]
 > **Worktree-only skill.** Виконується **виключно** в окремому git-worktree (`.worktrees/<current-branch>-coverage-f/`) і **не** паралелиться — один інстанс за раз.
 
@@ -23,6 +24,7 @@ cd ".worktrees/feature-x-coverage-f"
 ```
 
 Тобто branch-argument лишає slash як у git-гілці, а шлях для `cd` бере sanitized форму: slash → `-`.
+
 <!-- n-cursor:worktree:end -->
 
 # n-coverage-fix — підвищення mutation score

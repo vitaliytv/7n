@@ -1,6 +1,6 @@
 {
   "name": "@7n/n",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI-утиліта @7n/n",
   "keywords": [
     "7n",
@@ -22,12 +22,12 @@
   },
   "files": [
     "bin",
-    "index.js",
     "ch.js",
-    "getw.js",
-    "types",
-    "README.md",
     "CHANGELOG.md",
+    "getw.js",
+    "index.js",
+    "README.md",
+    "types",
     "!**/*.test.mjs"
   ],
   "type": "module",
