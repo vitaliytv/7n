@@ -58,6 +58,14 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status')
   })
 
+  it('change-файли — пріоритетне джерело меседжу, diff лише за їх відсутності', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain("grep -F '.changes/'")
+    expect(PUSH_ZSH_SCRIPT).toContain('if [[ -n "$changes_list" ]]; then')
+    expect(PUSH_ZSH_SCRIPT).toContain('git show ":$cf"')
+    // diff-фолбек (із виключенням шуму) — у гілці else, тобто коли change-файлів немає.
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached -- . "${noise[@]}"')
+  })
+
   it('у stdout ADR-файли згортаються в кількість, а не перелічуються поштучно', () => {
     expect(PUSH_ZSH_SCRIPT).toContain("grep -v 'docs/adr/'")
     expect(PUSH_ZSH_SCRIPT).toContain("grep -c 'docs/adr/'")
