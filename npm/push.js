@@ -11,6 +11,10 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 // Squash робимо через `git reset --soft <base>`: parent майбутнього коміту = base, тож push до
 // наявної origin/<branch> завжди fast-forward. Підтвердження НЕ питаємо (за вимогою) — у stdout
 // друкуємо subject коміту і список файлів. Коміт — з `--no-verify` (hooks тут не потрібні).
+// Для меседжу агенту згодовуємо ПОВНИЙ перелік файлів (scope), але diff БЕЗ вмісту шумних шляхів
+// (docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build) і обрізаний за
+// рядками — щоб шум не заглушував суть. Шум конфігурується: N7COMMIT_NO_DEFAULT_EXCLUDE,
+// N7COMMIT_EXCLUDE, N7COMMIT_MAX_DIFF_LINES. У stdout-переліку ADR-файли згортаються в кількість.
 const ZSH_SCRIPT = `
 ${MERGE_ZSH_LIB}
 
@@ -110,7 +114,57 @@ push() {
     local ctx msg
     ctx=$(mktemp)
     msg=$(mktemp)
-    git diff --cached > "$ctx"
+
+    # Шумні шляхи: їхній ВМІСТ не потрібен агенту, щоб визначити суть коміту (самі файли лишаються
+    # в коміті — виключаємо лише з diff-контексту генерації меседжу; їхні ІМЕНА агент усе одно бачить
+    # у name-status нижче). Дефолти вимикаються N7COMMIT_NO_DEFAULT_EXCLUDE=1; додаткові pathspec-глоби
+    # (пробіл-розділені) — через env N7COMMIT_EXCLUDE.
+    local -a noise
+    noise=()
+    if [[ "\${N7COMMIT_NO_DEFAULT_EXCLUDE:-0}" != "1" ]]; then
+        noise=(
+            ':(exclude)docs/**'            # вся документація в корені (ADR, гайди) — наратив, не суть коду
+            ':(exclude)**/docs/**'         # docs/ у будь-якому під-workspace
+            ':(exclude)**/CHANGELOG.md'    # генерується CI з change-файлів
+            ':(exclude)**/.changes/**'     # change-файли (bookkeeping)
+            ':(exclude)*.lock'             # bun.lock та інші *.lock
+            ':(exclude)**/package-lock.json'
+            ':(exclude)**/pnpm-lock.yaml'
+            ':(exclude)**/yarn.lock'
+            ':(exclude)**/*.snap'          # тест-снапшоти
+            ':(exclude)**/__snapshots__/**'
+            ':(exclude)**/*.min.js'        # мініфіковане
+            ':(exclude)**/*.map'           # source maps
+            ':(exclude)**/*.d.ts'          # генеровані типи (з JSDoc)
+            ':(exclude)dist/**'            # білд-артефакти
+            ':(exclude)build/**'
+            ':(exclude)coverage/**'
+        )
+    fi
+    local extra
+    for extra in \${(z)N7COMMIT_EXCLUDE:-}; do
+        noise+=( ":(exclude)$extra" )
+    done
+
+    # ctx: повний перелік файлів (scope) + diff БЕЗ вмісту шумних шляхів, обрізаний до
+    # N7COMMIT_MAX_DIFF_LINES рядків (дефолт 1500), щоб не топити суть у гігантських дифах.
+    local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
+    local full
+    full=$(mktemp)
+    git diff --cached -- . "\${noise[@]}" > "$full"
+    {
+        echo "# Усі змінені файли (повний перелік, scope):"
+        git diff --cached --name-status
+        echo ""
+        echo "# Diff (вміст шумних шляхів — ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build — виключено):"
+        head -n "$maxl" "$full"
+        local total=$(wc -l < "$full")
+        if (( total > maxl )); then
+            echo ""
+            echo "# … diff обрізано: показано $maxl з $total рядків (env N7COMMIT_MAX_DIFF_LINES)."
+        fi
+    } > "$ctx"
+    rm -f "$full"
 
     if ! _n7push_gen_message "$msg" "$ctx"; then
         echo "❌ Не вдалося згенерувати commit-меседж — нічого не закомічено й не запушено."
@@ -129,7 +183,12 @@ push() {
     echo ""
     echo "📝 Commit: $subject"
     echo "📂 Файли:"
-    git diff --cached --name-status | sed 's/^/   /'
+    # ADR-файли (docs/adr/) не перелічуємо поштучно — друкуємо лише їх кількість, щоб не шуміти.
+    local names adr_n
+    names=$(git diff --cached --name-status)
+    echo "$names" | grep -v 'docs/adr/' | sed 's/^/   /'
+    adr_n=$(echo "$names" | grep -c 'docs/adr/')
+    (( adr_n > 0 )) && echo "   📄 docs/adr/: $adr_n файл(ів)"
     echo ""
 
     if ! git commit --no-verify -F "$msg" > /dev/null; then
@@ -164,7 +223,11 @@ push "$1"
  * дивергенції (origin має коміти, яких немає локально) спершу автоматично підтягує їхню дельту тим
  * самим ядром, що й pull (`_n7merge_delta`, merge.js), тож віддалені правки не затираються; squash
  * робиться через `git reset --soft <base>`, тож push до наявної гілки — fast-forward. Підтвердження не
- * питає: у stdout друкує subject коміту і список файлів. Коміт — з `--no-verify`. Модель агента — env
+ * питає: у stdout друкує subject коміту і список файлів (ADR-файли — згорнуті в кількість). Коміт — з
+ * `--no-verify`. Для генерації меседжу агенту дається повний перелік файлів, але diff БЕЗ вмісту шумних
+ * шляхів (docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build) і обрізаний —
+ * щоб зменшити шум; конфігурується env
+ * `N7COMMIT_NO_DEFAULT_EXCLUDE`, `N7COMMIT_EXCLUDE`, `N7COMMIT_MAX_DIFF_LINES`. Модель агента — env
  * `N7COMMIT_MODEL` (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL` → `sonnet`) і `N7COMMIT_CURSOR_MODEL`
  * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). Потребує zsh, git і claude/cursor-agent.
  * @param {string} [branch] - назва гілки (дефолт — поточна)

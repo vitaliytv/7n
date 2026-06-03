@@ -43,6 +43,32 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('git push origin "$branch"')
     expect(PUSH_ZSH_SCRIPT).toContain('git push -u origin "$branch"')
   })
+
+  it('виключає вміст шумних шляхів із diff-контексту (docs/CHANGELOG/.changes/lock/d.ts)', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)docs/**")
+    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/docs/**")
+    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/CHANGELOG.md")
+    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/.changes/**")
+    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)*.lock")
+    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/*.d.ts")
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached -- . "${noise[@]}"')
+  })
+
+  it('повний перелік файлів (scope) дає агенту попри виключення вмісту', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status')
+  })
+
+  it('у stdout ADR-файли згортаються в кількість, а не перелічуються поштучно', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain("grep -v 'docs/adr/'")
+    expect(PUSH_ZSH_SCRIPT).toContain("grep -c 'docs/adr/'")
+    expect(PUSH_ZSH_SCRIPT).toContain('📄 docs/adr/: $adr_n файл(ів)')
+  })
+
+  it('шум конфігурується через env (вимкнення дефолтів, додаткові шляхи, ліміт рядків)', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_NO_DEFAULT_EXCLUDE:-0}')
+    expect(PUSH_ZSH_SCRIPT).toContain('${(z)N7COMMIT_EXCLUDE:-}')
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_LINES:-1500}')
+  })
 })
 
 describe('push', () => {
