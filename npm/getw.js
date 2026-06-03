@@ -5,24 +5,29 @@ import { once } from 'node:events'
 // тимчасовим комітом, накочуємо ЛИШЕ дельту цієї гілки (merge-base..target) у поточну гілку
 // як unstaged, після чого видаляємо worktree і його гілку. Дельту переносимо через
 // `git apply` (а не `git checkout <branch> -- .`), щоб не затерти файли, які змінювала тільки
-// поточна гілка. При конфлікті НЕ падаємо: пробуємо `git apply --3way` (лишає конфліктні
-// маркери) і доводимо мерж LLM-агентом — `claude -p` з фолбеком на `cursor-agent -p`. Worktree
-// видаляється лише після успішного перенесення; якщо маркери лишились — зберігаємо worktree
-// для ручного доведення. Запускаємо в zsh зі stdio:'inherit' — fzf потребує інтерактивного
-// TTY, тож виконуємо через дочірній процес, а не через Node-API.
+// поточна гілка. Спершу пробуємо чисте `git apply`; якщо не лягло — пофайловий 3-way через
+// `git merge-file` (працює лише по файлах, БЕЗ індексу, тож немає помилок "does not match index").
+// Розподіл ролей чіткий: СКРИПТ детерміновано готує конфлікти (ставить маркери), прибирає й
+// виносить вердикт (чи лишились маркери), а LLM-агент (`claude -p`, фолбек `cursor-agent -p`)
+// робить лише творчу частину — прибирає маркери. Агент нічого не видаляє і не запускає git.
+// Worktree видаляється лише коли маркерів не лишилось; інакше зберігаємо його для ручного
+// доведення. Запускаємо в zsh зі stdio:'inherit' — fzf потребує інтерактивного TTY, тож
+// виконуємо через дочірній процес, а не через Node-API.
 const ZSH_SCRIPT = `
+# Викликає LLM-агента, щоб ПРИБРАТИ конфліктні маркери у вже наявних файлах. Агент нічого не
+# видаляє і не запускає git — лише редагує перелічені файли; вердикт виносить скрипт окремо.
 _getw_resolve_with_agent() {
     local files="$1"
     local cur="$2"
     local tgt="$3"
-    local prompt="У git-дереві після перенесення змін гілки '$tgt' у '$cur' лишилися конфліктні маркери (<<<<<<<, =======, >>>>>>>) у файлах:
+    local prompt="Під час 3-way merge гілки '$tgt' у '$cur' у цих файлах лишилися конфліктні маркери (<<<<<<<, =======, >>>>>>>):
 $files
 
-Розв'яжи кожен конфлікт, поєднавши наміри обох сторін так, щоб результат був коректним і робочим. Прибери ВСІ конфліктні маркери у цих файлах. Редагуй ЛИШЕ перелічені файли і НЕ запускай жодних git-команд (add/commit/reset/checkout)."
+Для КОЖНОГО файлу розв'яжи всі конфлікти, поєднавши наміри обох сторін так, щоб результат був коректним і робочим, і прибери ВСІ конфліктні маркери (рядки <<<<<<<, =======, >>>>>>> разом з мітками гілок). Редагуй ЛИШЕ перелічені файли. НЕ створюй і НЕ видаляй файлів, НЕ запускай git-команд. Якщо файл — lock (напр. bun.lock) і надійно змержити неможливо, лиши версію '$tgt' без маркерів (його за потреби перегенерують окремо)."
 
     if command -v claude > /dev/null 2>&1; then
         echo "🤖 Інтелектуальний мерж через claude -p..."
-        claude -p "$prompt" --permission-mode acceptEdits --model "\${GETW_MERGE_MODEL:-sonnet}"
+        claude -p "$prompt" --permission-mode acceptEdits --allowedTools "Edit,Write,MultiEdit,Read" --model "\${GETW_MERGE_MODEL:-sonnet}"
         return $?
     fi
 
@@ -34,6 +39,16 @@ $files
 
     echo "❌ Немає ні claude, ні cursor-agent у PATH — інтелектуальний мерж неможливий."
     return 1
+}
+
+# З newline-списку файлів ($1) друкує ті, що ще містять конфліктні маркери. Це детермінований
+# вердикт скрипта: поки список непорожній — мерж не завершено.
+_getw_files_with_markers() {
+    local f
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        [[ -f "$f" ]] && grep -qE '^(<<<<<<<|>>>>>>>)' "$f" && echo "$f"
+    done <<< "$1"
 }
 
 getw() {
@@ -96,9 +111,9 @@ getw() {
         return 1
     fi
 
-    # Переносимо лише дельту worktree-гілки (merge-base..target). git apply без --index кладе
-    # зміни у робоче дерево незастейдженими і не чіпає файли поза патчем. При конфлікті НЕ падаємо:
-    # пробуємо --3way (лишає конфліктні маркери), тоді доводимо мерж LLM-агентом.
+    # Переносимо лише дельту worktree-гілки (merge-base..target). Спершу — чисте git apply (без
+    # --index: незастейджено, файли поза патчем не чіпає). Якщо не лягло — пофайловий 3-way через
+    # git merge-file (працює лише по файлах, без індексу, тож без "does not match index").
     local patch_file
     patch_file=$(mktemp)
     git diff --binary "$merge_base" "$target_branch" > "$patch_file"
@@ -110,45 +125,69 @@ getw() {
         rm -f "$patch_file"
         echo "✅ Зміни накочено чисто (Unstaged)."
     else
-        echo "⚠️ Чисте накочування не вдалося — пробую 3-way merge з конфліктними маркерами..."
-        local apply3_ok=1
-        git apply --3way --whitespace=nowarn "$patch_file" || apply3_ok=0
         rm -f "$patch_file"
+        echo "⚠️ Чисте накочування не вдалося — пофайловий 3-way merge (git merge-file)..."
 
-        local conflicted=$(git diff --name-only --diff-filter=U)
+        local conflict_files=""
+        local rel base_tmp ours_tmp theirs_tmp mf_rc
+        # --no-renames: rename = delete(old)+add(new), обидва кейси покрито в циклі.
+        local changed_files=$(git diff --no-renames --name-only "$merge_base" "$target_branch")
 
-        if [[ -z "$conflicted" ]]; then
-            if [[ "$apply3_ok" -eq 0 ]]; then
-                echo "❌ Не вдалося накотити зміни навіть 3-way merge — worktree '$target_branch' збережено."
-                return 1
+        while IFS= read -r rel; do
+            [[ -z "$rel" ]] && continue
+
+            # Видалено у target: прибираємо локально лише якщо поточна гілка файл не міняла.
+            if ! git cat-file -e "$target_branch:$rel" 2> /dev/null; then
+                if [[ -f "$rel" ]] && git show "$merge_base:$rel" 2> /dev/null | cmp -s - "$rel"; then
+                    rm -f "$rel"
+                elif [[ -f "$rel" ]]; then
+                    echo "⚠️ $rel видалено у '$target_branch', але змінено локально — лишаю локальну версію."
+                fi
+                continue
             fi
-            git reset > /dev/null
-            echo "✅ Зміни накочано 3-way merge без конфліктів (Unstaged)."
-        else
-            echo "🤖 Конфлікти у файлах:"
-            echo "$conflicted" | sed 's/^/   • /'
 
-            if ! _getw_resolve_with_agent "$conflicted" "$current_branch" "$target_branch"; then
+            base_tmp=$(mktemp); ours_tmp=$(mktemp); theirs_tmp=$(mktemp)
+            git show "$merge_base:$rel" > "$base_tmp" 2> /dev/null || : > "$base_tmp"
+            git show "$target_branch:$rel" > "$theirs_tmp" 2> /dev/null || : > "$theirs_tmp"
+            if [[ -f "$rel" ]]; then cp "$rel" "$ours_tmp"; else : > "$ours_tmp"; fi
+
+            # merge-file: 0 — чисто, 1..254 — є конфлікти (маркери), 255 — помилка (напр. бінарний).
+            git merge-file -p -L "поточна ($current_branch)" -L "база" -L "worktree ($target_branch)" \\
+                "$ours_tmp" "$base_tmp" "$theirs_tmp" > "$ours_tmp.merged" 2> /dev/null
+            mf_rc=$?
+
+            mkdir -p "$(dirname "$rel")"
+            if [[ "$mf_rc" -eq 255 ]]; then
+                cp "$theirs_tmp" "$rel"
+                echo "⚠️ $rel: 3-way неможливий (ймовірно бінарний) — взято версію '$target_branch'."
+            else
+                mv "$ours_tmp.merged" "$rel"
+                [[ "$mf_rc" -ne 0 ]] && conflict_files="$conflict_files$rel
+"
+            fi
+            rm -f "$base_tmp" "$ours_tmp" "$ours_tmp.merged" "$theirs_tmp"
+        done <<< "$changed_files"
+
+        if [[ -z "$conflict_files" ]]; then
+            echo "✅ 3-way merge без конфліктів (Unstaged)."
+        else
+            echo "🤖 Конфлікти (з маркерами) доводить агент:"
+            printf '%s' "$conflict_files" | sed 's/^/   • /'
+
+            if ! _getw_resolve_with_agent "$conflict_files" "$current_branch" "$target_branch"; then
                 echo "❌ Інтелектуальний мерж не виконано — worktree '$target_branch' збережено для ручного перенесення."
                 return 1
             fi
 
-            local leftover=""
-            local f
-            for f in \${(f)conflicted}; do
-                if [[ -f "$f" ]] && grep -qE '^(<<<<<<<|>>>>>>>)' "$f"; then
-                    leftover="$leftover $f"
-                fi
-            done
-
+            local leftover=$(_getw_files_with_markers "$conflict_files")
             if [[ -n "$leftover" ]]; then
-                echo "❌ Лишилися конфліктні маркери у:$leftover"
-                echo "   worktree '$target_branch' збережено для ручного доведення."
+                echo "❌ Лишилися конфліктні маркери — worktree '$target_branch' збережено для ручного доведення:"
+                printf '%s\\n' "$leftover" | sed 's/^/   • /'
                 return 1
             fi
 
-            git reset > /dev/null
             echo "✅ Конфлікти розв'язано агентом, зміни як Unstaged."
+            echo "   ⚠️ Перевір результат: git diff (lock-файли за потреби перегенеруй, напр. bun install)."
         fi
     fi
 
@@ -166,10 +205,12 @@ getw
 
 /**
  * Інтерактивно переносить дельту обраного git-worktree (merge-base..target) у поточну гілку
- * як unstaged (вибір через fzf) і прибирає цей worktree. При конфлікті пробує `git apply --3way`
- * і доводить мерж LLM-агентом (`claude -p`, фолбек `cursor-agent -p`); модель — через env
- * `GETW_MERGE_MODEL` / `GETW_MERGE_CURSOR_MODEL`. Потребує zsh та git; якщо fzf відсутній —
- * ставить його через `brew install fzf` (за наявності Homebrew).
+ * як unstaged (вибір через fzf) і прибирає цей worktree. При конфлікті робить пофайловий 3-way
+ * (`git merge-file`) і доводить маркери LLM-агентом (`claude -p`, фолбек `cursor-agent -p`);
+ * модель — через env `GETW_MERGE_MODEL` / `GETW_MERGE_CURSOR_MODEL`. Вердикт (чи лишились
+ * маркери) і прибирання — за скриптом, не за агентом. Worktree видаляється лише коли маркерів
+ * не лишилось. Потребує zsh та git; якщо fzf відсутній — ставить його через `brew install fzf`
+ * (за наявності Homebrew).
  * @param {typeof spawn} [spawnFn] - інжект `spawn` для тестів
  * @returns {Promise<number>} exit code дочірнього zsh-процесу
  */

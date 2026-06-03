@@ -9,13 +9,13 @@ import { stdin, stdout } from 'node:process'
 // Гібрид: задані флаги беруться як є, питається лише відсутнє. Без TTY і без флагів — не зависає.
 
 /** Дозволені semver-бампи (порядок = порядок у меню). */
-export const BUMPS = Object.freeze(['patch', 'minor', 'major'])
+const BUMPS = Object.freeze(['patch', 'minor', 'major'])
 
 /** Дозволені Keep a Changelog секції (порядок = порядок у меню). */
-export const SECTIONS = Object.freeze(['Added', 'Changed', 'Fixed', 'Removed'])
+const SECTIONS = Object.freeze(['Added', 'Changed', 'Fixed', 'Removed'])
 
 /** Підкаталог зі change-файлами всередині workspace. */
-export const CHANGES_DIR = '.changes'
+const CHANGES_DIR = '.changes'
 
 const USAGE = [
   'Використання: n-7 ch [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>] [--message "<опис>"] [--ws <шлях>]',

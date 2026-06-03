@@ -38,5 +38,6 @@ Chosen option: "перейменувати `bin/7.js` → `bin/cli.js` та пр
 | `"7n": "bin/cli.js"` | ✅ clean |
 
 Змінені файли:
-- `npm/package.json` — ключ `bin`: `"7"` → `"7n"`, значення `./bin/7.js` → `bin/cli.js`; `scripts.start`: `bun ./bin/7.js` → `bun ./bin/cli.js`
-- `npm/bin/7.js` → `npm/bin/cli.js` (перейменовано через `mv`)
+
+* `npm/package.json` — ключ `bin`: `"7"` → `"7n"`, значення `./bin/7.js` → `bin/cli.js`; `scripts.start`: `bun ./bin/7.js` → `bun ./bin/cli.js`
+* `npm/bin/7.js` → `npm/bin/cli.js` (перейменовано через `mv`)

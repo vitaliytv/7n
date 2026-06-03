@@ -2,7 +2,7 @@
 name: worktree
 description: >-
   Створення та керування git-worktree через n-cursor worktree CLI: ізольований
-  workspace у .worktrees/<branch>/ з інвентарним файлом-описом
+  workspace у `.worktrees/[branch]/` з інвентарним файлом-описом
 ---
 
 # worktree — ізольований workspace через CLI

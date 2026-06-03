@@ -23,6 +23,7 @@
   "files": [
     "bin",
     "index.js",
+    "ch.js",
     "getw.js",
     "types",
     "README.md",
