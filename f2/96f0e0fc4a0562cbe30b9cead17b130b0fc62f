@@ -1,0 +1,42 @@
+docs/adr/20260603-203208-автоматичний-getpull-при-дивергенції-у-push.md
+  s_c71a64bbf5af21::t_8c7db6c61db87f 1-21
+docs/adr/20260603-203208-команда-push-сквош-локальних-комітів-і-fast-forward-push.md
+  s_c71a64bbf5af21::t_f4323e07c62bd1 1-27
+npm/.changes/1780506647000-211678.md
+  s_ed9ade7b88e4be::t_cae8e476c809d7 5
+docs/adr/20260603-203208-фільтрація-шумних-шляхів-із-diff-контексту-для-push.md
+  s_c71a64bbf5af21::t_77c3d9a1938051 1-21
+npm/push.js
+  s_ed9ade7b88e4be::t_5d2c1914a1aec5 14-18
+  s_ed9ade7b88e4be::t_30e6910e001f32 41,44
+  s_ed9ade7b88e4be::t_72628275044e24 244-248
+  s_ed9ade7b88e4be::t_2db2788d25292f 151-153,155-156,161-182
+npm/tests/push.test.mjs
+  s_ed9ade7b88e4be::t_0b3963b103a3ef 61-68
+npm/README.md
+  s_ed9ade7b88e4be::t_402235d0ba9e8c 67-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f296f0e0fc4a0562cbe30b9cead17b130b0fc62f",
+  "prompts": {},
+  "sessions": {
+    "s_c71a64bbf5af21": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ce30d02-6327-44f9-b7e6-7f0b8e8efe40",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    },
+    "s_ed9ade7b88e4be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d261d410-e912-4f06-8fd5-2770efae874a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
