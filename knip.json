@@ -2,7 +2,12 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "project": ["**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}"],
   "ignore": ["**/__fixtures__/**"],
-  "ignoreDependencies": ["@nitra/cspell-dict", "/@cspell\\/dict-.+/", "globals", "graphql"],
+  "ignoreDependencies": [
+    "@nitra/cspell-dict",
+    "/@cspell\\/dict-.+/",
+    "globals",
+    "graphql"
+  ],
   "ignoreBinaries": [
     "actionlint",
     "cspell",
@@ -32,7 +37,12 @@
       ]
     },
     "npm": {
-      "entry": ["bin/n-7.js", "index.js", "stryker.config.mjs", "**/*.test.{js,mjs}"],
+      "entry": [
+        "bin/7.js",
+        "index.js",
+        "stryker.config.mjs",
+        "**/*.test.{js,mjs}"
+      ],
       "project": ["**/*.{js,mjs}"]
     }
   }

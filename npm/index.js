@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import { runCh } from './ch.js'
 import { getw } from './getw.js'
 
 const HELP = `@7n/7 — CLI
@@ -10,6 +11,7 @@ const HELP = `@7n/7 — CLI
 
 Команди:
   greet [ім'я]    Привітатися (типове ім'я — «світ»)
+  ch              Створити change-файл (.changes/) інтерактивно або з флагів (--bump/--section/--message/--ws)
   getw            Перенести зміни з обраного git-worktree у поточну гілку (fzf) і прибрати worktree
   version         Показати версію
   help            Показати цю довідку
@@ -61,6 +63,10 @@ export async function run(argv, io = {}) {
   if (command === 'greet') {
     log(greet(rest[0]))
     return 0
+  }
+
+  if (command === 'ch') {
+    return await runCh(rest, io)
   }
 
   if (command === 'getw') {

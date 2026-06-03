@@ -1,24 +1,27 @@
 {
-  "name": "@7n/7",
+  "name": "@7n/n",
   "version": "0.1.0",
-  "description": "CLI-утиліта @7n/7 (Bun monorepo)",
+  "description": "CLI-утиліта @7n/n",
   "keywords": [
     "cli",
     "7n",
     "bun"
   ],
-  "homepage": "https://github.com/7n/7#readme",
+  "homepage": "https://github.com/vitaliytv/7n#readme",
   "bugs": {
-    "url": "https://github.com/7n/7/issues"
+    "url": "https://github.com/vitaliytv/7n/issues"
   },
   "license": "ISC",
   "author": "vitaliytv@nitralabs.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/7n/7.git"
+    "url": "git+https://github.com/vitaliytv/7n.git"
   },
   "bin": {
-    "n-7": "./bin/n-7.js"
+    "n": "bin/n.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "main": "./index.js",
   "types": "./types/index.d.ts",
@@ -35,7 +38,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "start": "bun ./bin/n-7.js"
+    "start": "bun ./bin/n.js"
   },
   "dependencies": {},
   "engines": {
