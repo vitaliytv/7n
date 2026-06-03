@@ -15,6 +15,7 @@ describe('MERGE_ZSH_LIB', () => {
   })
 
   it('env-кнопки нейтральні (N7MERGE_*) із backward-фолбеком на GETW_*', () => {
+    expect(MERGE_ZSH_LIB).toContain('${N7MERGE_PI_MODEL:-}')
     expect(MERGE_ZSH_LIB).toContain('${N7MERGE_MODEL:-${GETW_MERGE_MODEL:-sonnet}}')
     expect(MERGE_ZSH_LIB).toContain('${N7MERGE_CURSOR_MODEL:-${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}')
     expect(MERGE_ZSH_LIB).toContain('${N7MERGE_NO_MERGIRAF:-${GETW_NO_MERGIRAF:-0}}')
@@ -29,6 +30,19 @@ describe('MERGE_ZSH_LIB', () => {
   it('промпт Tier-3-агента просить per-file підсумок у stdout', () => {
     expect(MERGE_ZSH_LIB).toContain('надрукуй')
     expect(MERGE_ZSH_LIB).toMatch(/підсумок по КОЖНОМУ файлу/)
+  })
+
+  it('пробує агентів у порядку pi → claude → cursor-agent', () => {
+    expect(MERGE_ZSH_LIB.indexOf('command -v pi')).toBeLessThan(MERGE_ZSH_LIB.indexOf('command -v claude'))
+    expect(MERGE_ZSH_LIB.indexOf('command -v claude')).toBeLessThan(MERGE_ZSH_LIB.indexOf('command -v cursor-agent'))
+    expect(MERGE_ZSH_LIB).toContain('--tools read,edit,write')
+  })
+
+  it('показує exit code агента і йде до наступного fallback', () => {
+    expect(MERGE_ZSH_LIB).toContain('_n7agent_report_failure "pi -p" "$rc" "$agent_out" "$agent_err"')
+    expect(MERGE_ZSH_LIB).toContain('_n7agent_report_failure "claude -p" "$rc" "$agent_out" "$agent_err"')
+    expect(MERGE_ZSH_LIB).toContain('❌ $agent не вдався (exit code: $rc).')
+    expect(MERGE_ZSH_LIB).toContain('Усі доступні LLM-агенти не спрацювали')
   })
 
   it('переносить дельту merge-base..src через apply→merge-file (не git checkout зрізу)', () => {

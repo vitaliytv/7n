@@ -4,7 +4,8 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 
 // zsh-функція push: бере ВСІ локальні коміти (origin/<branch>..HEAD) + усі зміни робочого дерева
 // (staged/unstaged/untracked через `git add -A`), сквошить їх в ОДИН коміт на вершині
-// origin/<branch>, генерує commit-меседж LLM-агентом (українською, Gitmoji + Monorepo) і пушить
+// origin/<branch>, генерує commit-меседж LLM-агентом (`pi` → `claude` → `cursor-agent`,
+// українською, Gitmoji + Monorepo) і пушить
 // одним комітом. Якщо origin/<branch> має коміти, яких немає локально (дивергенція), — НЕ зупиняємось,
 // а спершу автоматично підтягуємо їхню дельту через спільне ядро `_n7merge_delta` (merge.js, та сама
 // механіка, що й pull), і лише тоді сквошимо — інакше squash затер би віддалені правки.
@@ -44,19 +45,69 @@ _n7push_gen_message() {
 Контекст змін:
 $(cat "$ctx")"
 
+    local err rc
+    local tried_agent=0 last_rc=1
+
+    if command -v pi > /dev/null 2>&1; then
+        tried_agent=1
+        err=$(mktemp)
+        local -a pi_args
+        local pi_model="\${N7COMMIT_PI_MODEL:-\${N7MERGE_PI_MODEL:-}}"
+        pi_args=(-p --no-session --no-context-files --no-tools)
+        if [[ -n "$pi_model" ]]; then
+            pi_args+=(--model "$pi_model")
+        fi
+        echo "🤖 Генерую commit-меседж через pi -p..." >&2
+        pi "\${pi_args[@]}" "$prompt" > "$out" 2> "$err"
+        rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            [[ -s "$err" ]] && cat "$err" >&2
+            rm -f "$err"
+            return 0
+        fi
+        _n7agent_report_failure "pi -p" "$rc" "$out" "$err"
+        rm -f "$err"
+        last_rc="$rc"
+    fi
+
     if command -v claude > /dev/null 2>&1; then
+        tried_agent=1
+        err=$(mktemp)
         echo "🤖 Генерую commit-меседж через claude -p..." >&2
-        claude -p "$prompt" --model "\${N7COMMIT_MODEL:-\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}}" > "$out"
-        return $?
+        claude -p "$prompt" --model "\${N7COMMIT_MODEL:-\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}}" > "$out" 2> "$err"
+        rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            [[ -s "$err" ]] && cat "$err" >&2
+            rm -f "$err"
+            return 0
+        fi
+        _n7agent_report_failure "claude -p" "$rc" "$out" "$err"
+        rm -f "$err"
+        last_rc="$rc"
     fi
 
     if command -v cursor-agent > /dev/null 2>&1; then
+        tried_agent=1
+        err=$(mktemp)
         echo "🤖 Генерую commit-меседж через cursor-agent -p..." >&2
-        cursor-agent -p --force --output-format text --model "\${N7COMMIT_CURSOR_MODEL:-\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}}" "$prompt" > "$out"
-        return $?
+        cursor-agent -p --force --output-format text --model "\${N7COMMIT_CURSOR_MODEL:-\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}}" "$prompt" > "$out" 2> "$err"
+        rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            [[ -s "$err" ]] && cat "$err" >&2
+            rm -f "$err"
+            return 0
+        fi
+        _n7agent_report_failure "cursor-agent -p" "$rc" "$out" "$err"
+        rm -f "$err"
+        last_rc="$rc"
     fi
 
-    echo "❌ Немає ні claude, ні cursor-agent у PATH — згенерувати меседж неможливо." >&2
+    if [[ "$tried_agent" -eq 1 ]]; then
+        echo "❌ Усі доступні LLM-агенти не спрацювали або fallback-и недоступні." >&2
+        return "$last_rc"
+    fi
+
+    echo "❌ Немає pi, claude або cursor-agent у PATH — згенерувати меседж неможливо." >&2
     return 1
 }
 
@@ -184,7 +235,8 @@ push() {
     } > "$ctx"
 
     if ! _n7push_gen_message "$msg" "$ctx"; then
-        echo "❌ Не вдалося згенерувати commit-меседж — нічого не закомічено й не запушено."
+        echo "❌ Не вдалося згенерувати commit-меседж — коміт і push не виконано."
+        echo "ℹ️ Зміни вже можуть бути staged після git add -A."
         rm -f "$ctx" "$msg"
         return 1
     fi
@@ -236,7 +288,8 @@ push "$1"
 /**
  * Сквошить усі локальні коміти (`origin/<branch>..HEAD`) разом зі змінами робочого дерева
  * (`git add -A` — staged/unstaged/untracked) в ОДИН коміт на вершині `origin/<branch>`, генерує
- * commit-меседж LLM-агентом (українською, Gitmoji + Monorepo) і пушить його одним комітом. За
+ * commit-меседж LLM-агентом (`pi` → `claude` → `cursor-agent`, українською, Gitmoji + Monorepo) і
+ * пушить його одним комітом. За
  * дивергенції (origin має коміти, яких немає локально) спершу автоматично підтягує їхню дельту тим
  * самим ядром, що й pull (`_n7merge_delta`, merge.js), тож віддалені правки не затираються; squash
  * робиться через `git reset --soft <base>`, тож push до наявної гілки — fast-forward. Підтвердження не
@@ -247,7 +300,9 @@ push "$1"
  * build, обрізаний). Шум конфігурується env `N7COMMIT_NO_DEFAULT_EXCLUDE`, `N7COMMIT_EXCLUDE`,
  * `N7COMMIT_MAX_DIFF_LINES`. Модель агента — env
  * `N7COMMIT_MODEL` (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL` → `sonnet`) і `N7COMMIT_CURSOR_MODEL`
- * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). Потребує zsh, git і claude/cursor-agent.
+ * `N7COMMIT_PI_MODEL` (фолбек `N7MERGE_PI_MODEL`), для Claude — `N7COMMIT_MODEL`
+ * (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL`), для Cursor — `N7COMMIT_CURSOR_MODEL`
+ * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). Потребує zsh, git і pi/claude/cursor-agent.
  * @param {string} [branch] - назва гілки (дефолт — поточна)
  * @param {typeof spawn} [spawnFn] - інжект `spawn` для тестів
  * @returns {Promise<number>} exit code дочірнього zsh-процесу

@@ -9,7 +9,7 @@ import { once } from 'node:events'
 //   Tier 1 — пофайловий 3-way `git merge-file --diff3` (без індексу → без "does not match index");
 //   Tier 2 — структурний AST-авторезолвер `mergiraf solve` (off через N7MERGE_NO_MERGIRAF=1, авто-
 //            встановлення через brew/cargo);
-//   Tier 3 — LLM-агент (`claude -p`, фолбек `cursor-agent -p`) ЛИШЕ на залишок з маркерами.
+//   Tier 3 — LLM-агент (`pi -p` → `claude -p` → `cursor-agent -p`) ЛИШЕ на залишок з маркерами.
 // Перед перенесенням ядро робить pre-flight знімок незакомічених змін через `git stash create`
 // (commit-знімок без чіпання робочого дерева) і кладе його у stash-список — точка відкату, якщо
 // мердж чи Tier-3-агент щось зіпсує.
@@ -17,13 +17,31 @@ import { once } from 'node:events'
 // маркери) і регенерує bun.lock; агент робить лише творчу частину — прибирає маркери (нічого не
 // видаляє, git не запускає) і друкує per-file підсумок у stdout. Env-кнопки (нейтральний префікс
 // N7MERGE_, із backward-фолбеком на
-// історичні GETW_): N7MERGE_MODEL (фолбек GETW_MERGE_MODEL), N7MERGE_CURSOR_MODEL
-// (фолбек GETW_MERGE_CURSOR_MODEL), N7MERGE_NO_MERGIRAF (фолбек GETW_NO_MERGIRAF).
+// історичні GETW_): N7MERGE_PI_MODEL, N7MERGE_MODEL (фолбек GETW_MERGE_MODEL),
+// N7MERGE_CURSOR_MODEL (фолбек GETW_MERGE_CURSOR_MODEL), N7MERGE_NO_MERGIRAF
+// (фолбек GETW_NO_MERGIRAF).
 //
 // Фрагмент експортуємо як рядок (а не виконуваний модуль), бо самі команди — це zsh-скрипти, що
 // потребують інтерактивного TTY (fzf/агент); кожна вставляє цей блок у свій ZSH_SCRIPT і викликає
 // `_n7merge_delta <ours_ref> <src_ref>`.
 export const MERGE_ZSH_LIB = `
+# Друкує стислу діагностику non-zero exit від LLM CLI без prompt/diff-контексту.
+# $1 — назва агента, $2 — exit code, $3 — stdout-файл, $4 — stderr-файл.
+_n7agent_report_failure() {
+    local agent="$1" rc="$2" out_file="$3" err_file="$4"
+    local limit="\${N7AGENT_ERROR_LINES:-40}"
+
+    echo "❌ $agent не вдався (exit code: $rc)." >&2
+    if [[ -s "$err_file" ]]; then
+        echo "   stderr ($agent, перші $limit рядків):" >&2
+        head -n "$limit" "$err_file" | sed 's/^/   │ /' >&2
+    fi
+    if [[ -s "$out_file" ]]; then
+        echo "   stdout ($agent, перші $limit рядків):" >&2
+        head -n "$limit" "$out_file" | sed 's/^/   │ /' >&2
+    fi
+}
+
 # Викликає LLM-агента, щоб ПРИБРАТИ конфліктні маркери у вже наявних файлах. Агент нічого не
 # видаляє і не запускає git — лише редагує перелічені файли й друкує per-file підсумок (що хотіла
 # кожна сторона і як примирено) у stdout; вердикт (чи лишились маркери) виносить скрипт окремо.
@@ -39,19 +57,74 @@ $files
 
 Наприкінці надрукуй (у відповіді, НЕ у файли) короткий підсумок по КОЖНОМУ файлу: 1-2 рядки — що хотіла кожна сторона у конфлікті і як саме ти це примирив."
 
+    local agent_out agent_err rc
+    local tried_agent=0 last_rc=1
+
+    if command -v pi > /dev/null 2>&1; then
+        tried_agent=1
+        agent_out=$(mktemp)
+        agent_err=$(mktemp)
+        local -a pi_args
+        pi_args=(-p --no-session --no-context-files --tools read,edit,write)
+        if [[ -n "\${N7MERGE_PI_MODEL:-}" ]]; then
+            pi_args+=(--model "\${N7MERGE_PI_MODEL:-}")
+        fi
+        echo "🤖 Інтелектуальний мерж через pi -p..."
+        pi "\${pi_args[@]}" "$prompt" > "$agent_out" 2> "$agent_err"
+        rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            cat "$agent_out"
+            [[ -s "$agent_err" ]] && cat "$agent_err" >&2
+            rm -f "$agent_out" "$agent_err"
+            return 0
+        fi
+        _n7agent_report_failure "pi -p" "$rc" "$agent_out" "$agent_err"
+        rm -f "$agent_out" "$agent_err"
+        last_rc="$rc"
+    fi
+
     if command -v claude > /dev/null 2>&1; then
+        tried_agent=1
+        agent_out=$(mktemp)
+        agent_err=$(mktemp)
         echo "🤖 Інтелектуальний мерж через claude -p..."
-        claude -p "$prompt" --permission-mode acceptEdits --allowedTools "Edit,Write,MultiEdit,Read" --model "\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}"
-        return $?
+        claude -p "$prompt" --permission-mode acceptEdits --allowedTools "Edit,Write,MultiEdit,Read" --model "\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}" > "$agent_out" 2> "$agent_err"
+        rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            cat "$agent_out"
+            [[ -s "$agent_err" ]] && cat "$agent_err" >&2
+            rm -f "$agent_out" "$agent_err"
+            return 0
+        fi
+        _n7agent_report_failure "claude -p" "$rc" "$agent_out" "$agent_err"
+        rm -f "$agent_out" "$agent_err"
+        last_rc="$rc"
     fi
 
     if command -v cursor-agent > /dev/null 2>&1; then
+        tried_agent=1
+        agent_out=$(mktemp)
+        agent_err=$(mktemp)
         echo "🤖 Інтелектуальний мерж через cursor-agent -p..."
-        cursor-agent -p --force --output-format text --model "\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}" "$prompt"
-        return $?
+        cursor-agent -p --force --output-format text --model "\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}" "$prompt" > "$agent_out" 2> "$agent_err"
+        rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            cat "$agent_out"
+            [[ -s "$agent_err" ]] && cat "$agent_err" >&2
+            rm -f "$agent_out" "$agent_err"
+            return 0
+        fi
+        _n7agent_report_failure "cursor-agent -p" "$rc" "$agent_out" "$agent_err"
+        rm -f "$agent_out" "$agent_err"
+        last_rc="$rc"
     fi
 
-    echo "❌ Немає ні claude, ні cursor-agent у PATH — інтелектуальний мерж неможливий."
+    if [[ "$tried_agent" -eq 1 ]]; then
+        echo "❌ Усі доступні LLM-агенти не спрацювали або fallback-и недоступні." >&2
+        return "$last_rc"
+    fi
+
+    echo "❌ Немає pi, claude або cursor-agent у PATH — інтелектуальний мерж неможливий."
     return 1
 }
 

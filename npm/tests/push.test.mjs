@@ -26,6 +26,24 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('git commit --no-verify -F "$msg"')
   })
 
+  it('пробує агентів у порядку pi → claude → cursor-agent', () => {
+    expect(PUSH_ZSH_SCRIPT.indexOf('command -v pi')).toBeLessThan(PUSH_ZSH_SCRIPT.indexOf('command -v claude'))
+    expect(PUSH_ZSH_SCRIPT.indexOf('command -v claude')).toBeLessThan(PUSH_ZSH_SCRIPT.indexOf('command -v cursor-agent'))
+    expect(PUSH_ZSH_SCRIPT).toContain('--no-tools')
+  })
+
+  it('показує exit code агента і йде до наступного fallback', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7agent_report_failure "pi -p" "$rc" "$out" "$err"')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7agent_report_failure "claude -p" "$rc" "$out" "$err"')
+    expect(PUSH_ZSH_SCRIPT).toContain('❌ $agent не вдався (exit code: $rc).')
+    expect(PUSH_ZSH_SCRIPT).toContain('Усі доступні LLM-агенти не спрацювали')
+  })
+
+  it('уточнює, що після падіння генерації зміни вже можуть бути staged', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('коміт і push не виконано')
+    expect(PUSH_ZSH_SCRIPT).toContain('Зміни вже можуть бути staged після git add -A')
+  })
+
   it('друкує subject і список файлів у stdout (без інтерактивного підтвердження)', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('📝 Commit: $subject')
     expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status')
@@ -33,6 +51,7 @@ describe('PUSH_ZSH_SCRIPT', () => {
   })
 
   it('модель агента — нейтральний N7COMMIT_* із фолбеком на N7MERGE_*/GETW_*', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_PI_MODEL:-${N7MERGE_PI_MODEL:-}}')
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MODEL:-${N7MERGE_MODEL:-${GETW_MERGE_MODEL:-sonnet}}}')
     expect(PUSH_ZSH_SCRIPT).toContain(
       '${N7COMMIT_CURSOR_MODEL:-${N7MERGE_CURSOR_MODEL:-${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}}'
