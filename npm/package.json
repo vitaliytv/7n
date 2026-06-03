@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "description": "CLI-утиліта @7n/n",
   "keywords": [
-    "cli",
     "7n",
-    "bun"
+    "bun",
+    "cli"
   ],
   "homepage": "https://github.com/vitaliytv/7n#readme",
   "bugs": {
@@ -20,20 +20,21 @@
   "bin": {
     "n": "bin/n.js"
   },
-  "publishConfig": {
-    "access": "public"
-  },
-  "main": "./index.js",
-  "types": "./types/index.d.ts",
   "files": [
     "bin",
     "index.js",
     "getw.js",
     "types",
     "README.md",
+    "CHANGELOG.md",
     "!**/*.test.mjs"
   ],
   "type": "module",
+  "main": "./index.js",
+  "types": "./types/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
