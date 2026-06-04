@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { changeFileName, collectChange, parseChArgs, runCh, serializeChange } from '../ch.js'
+import { changeFileName, collectChange, formatCreated, parseChArgs, runCh, serializeChange } from '../ch.js'
 import { run } from '../index.js'
 
 const BUMP_ERR_RE = /bump/
@@ -25,10 +25,17 @@ function collector() {
 }
 
 describe('serializeChange', () => {
-  it('пише frontmatter bump+section і trimmed-опис', () => {
-    expect(serializeChange({ bump: 'minor', section: 'Added', message: '  опис  ' })).toBe(
-      '---\nbump: minor\nsection: Added\n---\nопис\n'
+  it('пише frontmatter bump+section+created і trimmed-опис', () => {
+    const now = new Date(2026, 5, 3, 14, 30).getTime()
+    expect(serializeChange({ bump: 'minor', section: 'Added', message: '  опис  ' }, now)).toBe(
+      '---\nbump: minor\nsection: Added\ncreated: 03.06 14:30\n---\nопис\n'
     )
+  })
+})
+
+describe('formatCreated', () => {
+  it('формат день.місяць година:хвилини з дозаповненням нулями', () => {
+    expect(formatCreated(new Date(2026, 0, 5, 9, 7).getTime())).toBe('05.01 09:07')
   })
 })
 
@@ -110,7 +117,10 @@ describe('runCh', () => {
     })
     expect(code).toBe(0)
     expect(writes).toEqual([
-      { path: '/repo/npm/.changes/1000-deadbe.md', content: '---\nbump: minor\nsection: Added\n---\nопис\n' }
+      {
+        path: '/repo/npm/.changes/1000-deadbe.md',
+        content: `---\nbump: minor\nsection: Added\ncreated: ${formatCreated(1000)}\n---\nопис\n`
+      }
     ])
     expect(io.lines).toEqual(['✅ npm/.changes/1000-deadbe.md'])
   })
@@ -130,7 +140,7 @@ describe('runCh', () => {
     })
     expect(code).toBe(0)
     expect(writes[0].path).toBe('/r/.changes/42-beef00.md')
-    expect(writes[0].content).toBe('---\nbump: patch\nsection: Changed\n---\nінтерактивний опис\n')
+    expect(writes[0].content).toBe(`---\nbump: patch\nsection: Changed\ncreated: ${formatCreated(42)}\n---\nінтерактивний опис\n`)
   })
 })
 
