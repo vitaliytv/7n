@@ -50,6 +50,7 @@ _n7merge_resolve_with_agent() {
     local files="$1"
     local ours="$2"
     local src="$3"
+    local summary_out="$4"
     local prompt="Під час 3-way merge '$src' у '$ours' у цих файлах лишилися конфліктні маркери (<<<<<<<, =======, >>>>>>>):
 $files
 
@@ -73,7 +74,9 @@ $files
         pi "\${pi_args[@]}" "$prompt" > "$agent_out" 2> "$agent_err"
         rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            cat "$agent_out"
+            # Підсумок агента не друкуємо одразу — віддаємо його ядру (через summary_out), щоб
+            # показати у розділі Tier 3 разом із блоками конфлікту. Без summary_out — старий cat.
+            if [[ -n "$summary_out" ]]; then cp "$agent_out" "$summary_out"; else cat "$agent_out"; fi
             [[ -s "$agent_err" ]] && cat "$agent_err" >&2
             rm -f "$agent_out" "$agent_err"
             return 0
@@ -91,7 +94,9 @@ $files
         claude -p "$prompt" --permission-mode acceptEdits --allowedTools "Edit,Write,MultiEdit,Read" --model "\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}" > "$agent_out" 2> "$agent_err"
         rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            cat "$agent_out"
+            # Підсумок агента не друкуємо одразу — віддаємо його ядру (через summary_out), щоб
+            # показати у розділі Tier 3 разом із блоками конфлікту. Без summary_out — старий cat.
+            if [[ -n "$summary_out" ]]; then cp "$agent_out" "$summary_out"; else cat "$agent_out"; fi
             [[ -s "$agent_err" ]] && cat "$agent_err" >&2
             rm -f "$agent_out" "$agent_err"
             return 0
@@ -109,7 +114,9 @@ $files
         cursor-agent -p --force --output-format text --model "\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}" "$prompt" > "$agent_out" 2> "$agent_err"
         rc=$?
         if [[ "$rc" -eq 0 ]]; then
-            cat "$agent_out"
+            # Підсумок агента не друкуємо одразу — віддаємо його ядру (через summary_out), щоб
+            # показати у розділі Tier 3 разом із блоками конфлікту. Без summary_out — старий cat.
+            if [[ -n "$summary_out" ]]; then cp "$agent_out" "$summary_out"; else cat "$agent_out"; fi
             [[ -s "$agent_err" ]] && cat "$agent_err" >&2
             rm -f "$agent_out" "$agent_err"
             return 0
@@ -195,9 +202,31 @@ _n7merge_ensure_mergiraf() {
     return 1
 }
 
+# Друкує OURS-секцію (приймач) diff3-маркованого файлу: рядки між <<<<<<< і ||||||| (усі регіони).
+_n7merge_block_ours() {
+    awk '
+        /^<<<<<<< /{f=1; next}
+        /^[|]{7}/{f=0; next}
+        /^=======$/{f=0; next}
+        /^>>>>>>> /{f=0; next}
+        f
+    ' "$1"
+}
+
+# Друкує THEIRS-секцію (джерело) diff3-маркованого файлу: рядки між ======= і >>>>>>> (усі регіони).
+_n7merge_block_theirs() {
+    awk '
+        /^=======$/{f=1; next}
+        /^>>>>>>> /{f=0; next}
+        f
+    ' "$1"
+}
+
 # Ядро: переносить дельту merge-base(ours, src)..src у поточне робоче дерево як unstaged.
 # $1 — ours_ref (поточна сторона: гілка або HEAD), $2 — src_ref (джерело: worktree-гілка або
 # origin/<branch>). Багаторівнево: git apply → git merge-file --diff3 → mergiraf → LLM-агент.
+# Замість пофайлового шуму (git "error: patch failed", per-file mergiraf-рядки) друкує лаконічний
+# підсумок по тірах; деталі (блоки конфлікту + результат + коментар LLM) — лише для Tier 3.
 # Повертає 0, якщо дельту перенесено без невирішених маркерів; 1 — якщо лишились конфлікти/помилка.
 _n7merge_delta() {
     local ours="$1"
@@ -219,6 +248,10 @@ _n7merge_delta() {
         return 1
     fi
 
+    # --no-renames: rename = delete(old)+add(new), обидва кейси покрито в циклі.
+    local changed_files=$(git diff --no-renames --name-only "$merge_base" "$src")
+    local total_files=$(printf '%s' "$changed_files" | grep -c .)
+
     local patch_file
     patch_file=$(mktemp)
     git diff --binary "$merge_base" "$src" > "$patch_file"
@@ -228,20 +261,25 @@ _n7merge_delta() {
         echo "ℹ️ Дельта порожня — переносити нічого."
         return 0
     fi
-    if git apply --whitespace=nowarn "$patch_file"; then
+    # Tier 1 (git): чистий apply. stderr глушимо — "error: patch failed" не помилка, а лише сигнал
+    # перейти на пофайловий 3-way; що саме сталося, видно з підсумку по тірах нижче.
+    if git apply --whitespace=nowarn "$patch_file" 2> /dev/null; then
         rm -f "$patch_file"
-        echo "✅ Зміни накочано чисто (Unstaged)."
+        echo "📊 Підсумок мерджу (Unstaged):"
+        echo "   Tier 1 (git):      $total_files файл(ів)"
+        echo "   Tier 2 (mergiraf): 0 файл(ів)"
+        echo "   Tier 3 (LLM):      0 файл(ів)"
         return 0
     fi
     rm -f "$patch_file"
-    echo "⚠️ Чисте накочування не вдалося — пофайловий 3-way merge (git merge-file)..."
     _n7merge_ensure_mergiraf
 
+    local tier1=0 tier2=0
     local conflict_files=""
     local regen_bun=0
-    local rel base_tmp ours_tmp theirs_tmp mf_rc bn
-    # --no-renames: rename = delete(old)+add(new), обидва кейси покрито в циклі.
-    local changed_files=$(git diff --no-renames --name-only "$merge_base" "$src")
+    local rel base_tmp ours_tmp theirs_tmp mf_rc bn pre
+    # Паралельні масиви Tier 3: rel-шлях і пре-знімок (diff3-маркований) для рендеру блоків опісля.
+    local -a t3_files t3_pre
 
     while IFS= read -r rel; do
         [[ -z "$rel" ]] && continue
@@ -250,6 +288,7 @@ _n7merge_delta() {
         if ! git cat-file -e "$src:$rel" 2> /dev/null; then
             if [[ -f "$rel" ]] && git show "$merge_base:$rel" 2> /dev/null | cmp -s - "$rel"; then
                 rm -f "$rel"
+                tier1=$((tier1 + 1))
             elif [[ -f "$rel" ]]; then
                 echo "⚠️ $rel видалено у '$src', але змінено локально — лишаю локальну версію."
             fi
@@ -261,10 +300,8 @@ _n7merge_delta() {
         if [[ "$rel" = "bun.lock" ]]; then
             if _n7merge_bun_lock_differs "$ours" "$src"; then
                 regen_bun=1
-                echo "🔒 bun.lock: відрізняється від '$src' — перегенерую через bun install після мержу."
-            else
-                echo "ℹ️ bun.lock: збігається з '$src' — bun install не потрібен."
             fi
+            tier1=$((tier1 + 1))
             continue
         fi
         # Інші lock-файли: пофайловий merge-file дає лише шум — беремо версію src.
@@ -272,6 +309,7 @@ _n7merge_delta() {
             mkdir -p "$(dirname "$rel")"
             git show "$src:$rel" > "$rel" 2> /dev/null
             echo "🔒 $rel: взято версію '$src' — перегенеруй відповідним пакетним менеджером."
+            tier1=$((tier1 + 1))
             continue
         fi
 
@@ -290,42 +328,72 @@ _n7merge_delta() {
         if [[ "$mf_rc" -eq 255 ]]; then
             cp "$theirs_tmp" "$rel"
             echo "⚠️ $rel: 3-way неможливий (ймовірно бінарний) — взято версію '$src'."
+            tier1=$((tier1 + 1))
         else
             mv "$ours_tmp.merged" "$rel"
-            if [[ "$mf_rc" -ne 0 ]]; then
-                # Tier 2: структурний авторезолвер. Якщо повністю розв'язав — у конфлікти не додаємо.
-                if _n7merge_mergiraf_solve "$rel"; then
-                    echo "   🧩 mergiraf розв'язав: $rel"
-                else
-                    conflict_files="$conflict_files$rel
+            if [[ "$mf_rc" -eq 0 ]]; then
+                tier1=$((tier1 + 1))
+            elif _n7merge_mergiraf_solve "$rel"; then
+                # Tier 2: структурний авторезолвер повністю розв'язав файл.
+                tier2=$((tier2 + 1))
+            else
+                # Tier 3: лишилися маркери — пре-знімок (для блоків) і у чергу до агента.
+                pre=$(mktemp)
+                cp "$rel" "$pre"
+                t3_files+=("$rel")
+                t3_pre+=("$pre")
+                conflict_files="$conflict_files$rel
 "
-                fi
             fi
         fi
         rm -f "$base_tmp" "$ours_tmp" "$ours_tmp.merged" "$theirs_tmp"
     done <<< "$changed_files"
 
-    local rc=0
-    if [[ -z "$conflict_files" ]]; then
-        echo "✅ 3-way merge без конфліктів (Unstaged)."
-    else
-        echo "🤖 Конфлікти (з маркерами) доводить агент:"
-        printf '%s' "$conflict_files" | sed 's/^/   • /'
-
-        if ! _n7merge_resolve_with_agent "$conflict_files" "$ours" "$src"; then
-            echo "❌ Інтелектуальний мерж не виконано."
+    # Tier 3: агент прибирає маркери; його per-file підсумок збираємо у файл (показуємо нижче).
+    local rc=0 leftover="" agent_summary=""
+    if [[ -n "$conflict_files" ]]; then
+        agent_summary=$(mktemp)
+        if ! _n7merge_resolve_with_agent "$conflict_files" "$ours" "$src" "$agent_summary"; then
             rc=1
         else
-            local leftover=$(_n7merge_files_with_markers "$conflict_files")
-            if [[ -n "$leftover" ]]; then
-                echo "❌ Лишилися конфліктні маркери:"
-                printf '%s\\n' "$leftover" | sed 's/^/   • /'
-                rc=1
-            else
-                echo "✅ Конфлікти розв'язано агентом, зміни як Unstaged."
-                echo "   ⚠️ Перевір результат: git diff."
-            fi
+            leftover=$(_n7merge_files_with_markers "$conflict_files")
+            [[ -n "$leftover" ]] && rc=1
         fi
+    fi
+
+    echo "📊 Підсумок мерджу (Unstaged):"
+    echo "   Tier 1 (git):      $tier1 файл(ів)"
+    echo "   Tier 2 (mergiraf): $tier2 файл(ів)"
+    echo "   Tier 3 (LLM):      \${#t3_files[@]} файл(ів)"
+
+    # Tier 3 деталізація — по кожному файлу: блок приймача, блок джерела, результат і коментар LLM.
+    local i rel3
+    for ((i = 1; i <= \${#t3_files[@]}; i++)); do
+        rel3="\${t3_files[$i]}"
+        pre="\${t3_pre[$i]}"
+        echo ""
+        echo "📄 $rel3"
+        echo "   ── Приймач (поточна $ours):"
+        _n7merge_block_ours "$pre" | sed 's/^/      /'
+        echo "   ── Джерело ($src):"
+        _n7merge_block_theirs "$pre" | sed 's/^/      /'
+        echo "   ── Результат:"
+        [[ -f "$rel3" ]] && diff "$pre" "$rel3" 2> /dev/null | sed -n 's/^> /      /p'
+        rm -f "$pre"
+    done
+
+    if [[ -n "$agent_summary" && -s "$agent_summary" ]]; then
+        echo ""
+        echo "🤖 Коментар LLM (thinking):"
+        sed 's/^/   /' "$agent_summary"
+    fi
+    [[ -n "$agent_summary" ]] && rm -f "$agent_summary"
+
+    if [[ -n "$leftover" ]]; then
+        echo "❌ Лишилися конфліктні маркери:"
+        printf '%s\\n' "$leftover" | sed 's/^/   • /'
+    elif [[ "$rc" -eq 1 ]]; then
+        echo "❌ Інтелектуальний мерж не виконано."
     fi
 
     # bun.lock: bun install лише якщо regen_bun (lock відрізнявся від src), мерж успішний і досі різний.

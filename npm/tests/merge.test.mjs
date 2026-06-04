@@ -12,6 +12,27 @@ describe('MERGE_ZSH_LIB', () => {
     expect(MERGE_ZSH_LIB).toContain('_n7merge_resolve_with_agent()')
     expect(MERGE_ZSH_LIB).toContain('_n7merge_ensure_mergiraf()')
     expect(MERGE_ZSH_LIB).toContain('_n7merge_bun_lock_differs()')
+    expect(MERGE_ZSH_LIB).toContain('_n7merge_block_ours()')
+    expect(MERGE_ZSH_LIB).toContain('_n7merge_block_theirs()')
+  })
+
+  it('друкує лаконічний підсумок по тірах замість пофайлового шуму', () => {
+    expect(MERGE_ZSH_LIB).toContain('Tier 1 (git):')
+    expect(MERGE_ZSH_LIB).toContain('Tier 2 (mergiraf):')
+    expect(MERGE_ZSH_LIB).toContain('Tier 3 (LLM):')
+    // git "error: patch failed" — це не помилка, а сигнал перейти на 3-way: stderr глушимо.
+    expect(MERGE_ZSH_LIB).toContain('git apply --whitespace=nowarn "$patch_file" 2> /dev/null')
+    // Пофайлового "🧩 mergiraf розв'язав: …" більше немає — лише лічильник tier2.
+    expect(MERGE_ZSH_LIB).not.toContain("mergiraf розв'язав")
+  })
+
+  it('Tier 3 показує блоки приймача/джерела, результат і коментар LLM', () => {
+    expect(MERGE_ZSH_LIB).toContain('Приймач (поточна')
+    expect(MERGE_ZSH_LIB).toContain('Джерело (')
+    expect(MERGE_ZSH_LIB).toContain('Результат:')
+    expect(MERGE_ZSH_LIB).toContain('Коментар LLM')
+    // Підсумок агента йде у файл (4-й арг), а не одразу в stdout, щоб лягти у розділ Tier 3.
+    expect(MERGE_ZSH_LIB).toContain('_n7merge_resolve_with_agent "$conflict_files" "$ours" "$src" "$agent_summary"')
   })
 
   it('env-кнопки нейтральні (N7MERGE_*) із backward-фолбеком на GETW_*', () => {
