@@ -28,7 +28,9 @@ describe('PUSH_ZSH_SCRIPT', () => {
 
   it('пробує агентів у порядку pi → claude → cursor-agent', () => {
     expect(PUSH_ZSH_SCRIPT.indexOf('command -v pi')).toBeLessThan(PUSH_ZSH_SCRIPT.indexOf('command -v claude'))
-    expect(PUSH_ZSH_SCRIPT.indexOf('command -v claude')).toBeLessThan(PUSH_ZSH_SCRIPT.indexOf('command -v cursor-agent'))
+    expect(PUSH_ZSH_SCRIPT.indexOf('command -v claude')).toBeLessThan(
+      PUSH_ZSH_SCRIPT.indexOf('command -v cursor-agent')
+    )
     expect(PUSH_ZSH_SCRIPT).toContain('--no-tools')
   })
 
@@ -64,12 +66,12 @@ describe('PUSH_ZSH_SCRIPT', () => {
   })
 
   it('виключає вміст шумних шляхів із diff-контексту (docs/CHANGELOG/.changes/lock/d.ts)', () => {
-    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)docs/**")
-    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/docs/**")
-    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/CHANGELOG.md")
-    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/.changes/**")
-    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)*.lock")
-    expect(PUSH_ZSH_SCRIPT).toContain(":(exclude)**/*.d.ts")
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)docs/**')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/docs/**')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/CHANGELOG.md')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/.changes/**')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)*.lock')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/*.d.ts')
     expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached -- . "${noise[@]}"')
   })
 

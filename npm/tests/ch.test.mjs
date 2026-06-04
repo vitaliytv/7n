@@ -140,7 +140,9 @@ describe('runCh', () => {
     })
     expect(code).toBe(0)
     expect(writes[0].path).toBe('/r/.changes/42-beef00.md')
-    expect(writes[0].content).toBe(`---\nbump: patch\nsection: Changed\ncreated: ${formatCreated(42)}\n---\nінтерактивний опис\n`)
+    expect(writes[0].content).toBe(
+      `---\nbump: patch\nsection: Changed\ncreated: ${formatCreated(42)}\n---\nінтерактивний опис\n`
+    )
   })
 })
 
