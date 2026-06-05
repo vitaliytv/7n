@@ -21,6 +21,41 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 const ZSH_SCRIPT = `
 ${MERGE_ZSH_LIB}
 
+# ── Налагодження (N7COMMIT_DEBUG=1) ──────────────────────────────────────────
+# Друкує позначені часом діагностичні рядки у stderr (щоб НЕ потрапити в commit-
+# меседж, який збирається у stdout/файл) — лише за N7COMMIT_DEBUG=1. Мета: бачити,
+# на якому етапі push «висить» і скільки реально триває кожен виклик LLM-агента.
+# Час відлічуємо від старту push (_n7t0, EPOCHREALTIME — монотонний float-час zsh).
+zmodload zsh/datetime 2> /dev/null
+typeset -g _n7t0=\${EPOCHREALTIME:-0}
+
+_n7dbg() {
+    [[ "\${N7COMMIT_DEBUG:-0}" = "1" ]] || return 0
+    printf '🔎 [%7.2fs] %s\\n' "$(( EPOCHREALTIME - _n7t0 ))" "$*" >&2
+}
+
+# Підсумок виклику LLM-агента (лише за N7COMMIT_DEBUG=1): rc, тривалість, розмір
+# і перші рядки stdout/stderr — щоб відрізнити «модель довго думає» від «агент
+# завис на stdin/мережі/авторизації». $1 — мітка, $2 — старт (EPOCHREALTIME),
+# $3 — rc, $4 — stdout-файл, $5 — stderr-файл.
+_n7dbg_agent_done() {
+    [[ "\${N7COMMIT_DEBUG:-0}" = "1" ]] || return 0
+    local label="$1" start="$2" rc="$3" out="$4" err="$5"
+    local obytes=0 olines=0 ebytes=0
+    [[ -f "$out" ]] && { obytes=$(wc -c < "$out" | tr -d ' '); olines=$(wc -l < "$out" | tr -d ' '); }
+    [[ -f "$err" ]] && ebytes=$(wc -c < "$err" | tr -d ' ')
+    printf '🔎 [%7.2fs] %s: фініш rc=%s за %.2fs · stdout %sb/%sрядк · stderr %sb\\n' \\
+        "$(( EPOCHREALTIME - _n7t0 ))" "$label" "$rc" "$(( EPOCHREALTIME - start ))" "$obytes" "$olines" "$ebytes" >&2
+    if [[ -s "$out" ]]; then
+        echo "🔎 │ $label stdout (перші 5 рядків):" >&2
+        head -n 5 "$out" | sed 's/^/🔎 │   /' >&2
+    fi
+    if [[ -s "$err" ]]; then
+        echo "🔎 │ $label stderr (перші 5 рядків):" >&2
+        head -n 5 "$err" | sed 's/^/🔎 │   /' >&2
+    fi
+}
+
 # Генерує multi-line commit-меседж (українською, Gitmoji + Monorepo / Conventional Commits зі scope)
 # LLM-агентом на основі застейдженої дельти. $1 — файл-вивід для меседжу, $2 — файл із git diff.
 # Прогрес друкуємо у stderr, щоб у $1 потрапив ЛИШЕ сам меседж. Повертає код агента (0 — успіх).
@@ -46,8 +81,9 @@ _n7push_gen_message() {
 Контекст змін:
 $(cat "$ctx")"
 
-    local err rc
+    local err rc t0
     local tried_agent=0 last_rc=1
+    _n7dbg "ген-меседж: старт · prompt=\${#prompt} символів · ctx=$ctx ($(wc -l < "$ctx" | tr -d ' ')рядк/$(wc -c < "$ctx" | tr -d ' ')б)"
 
     if command -v pi > /dev/null 2>&1; then
         tried_agent=1
@@ -59,8 +95,11 @@ $(cat "$ctx")"
             pi_args+=(--model "$pi_model")
         fi
         echo "🤖 Генерую commit-меседж через pi -p..." >&2
+        _n7dbg "pi -p: запускаю · args=[\${pi_args[*]}] · model=\${pi_model:-<дефолт>}"
+        t0=$EPOCHREALTIME
         pi "\${pi_args[@]}" "$prompt" > "$out" 2> "$err"
         rc=$?
+        _n7dbg_agent_done "pi -p" "$t0" "$rc" "$out" "$err"
         if [[ "$rc" -eq 0 ]]; then
             [[ -s "$err" ]] && cat "$err" >&2
             rm -f "$err"
@@ -75,8 +114,12 @@ $(cat "$ctx")"
         tried_agent=1
         err=$(mktemp)
         echo "🤖 Генерую commit-меседж через claude -p..." >&2
-        claude -p "$prompt" --model "\${N7COMMIT_MODEL:-\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}}" > "$out" 2> "$err"
+        local claude_model="\${N7COMMIT_MODEL:-\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}}"
+        _n7dbg "claude -p: запускаю · model=$claude_model"
+        t0=$EPOCHREALTIME
+        claude -p "$prompt" --model "$claude_model" > "$out" 2> "$err"
         rc=$?
+        _n7dbg_agent_done "claude -p" "$t0" "$rc" "$out" "$err"
         if [[ "$rc" -eq 0 ]]; then
             [[ -s "$err" ]] && cat "$err" >&2
             rm -f "$err"
@@ -91,8 +134,12 @@ $(cat "$ctx")"
         tried_agent=1
         err=$(mktemp)
         echo "🤖 Генерую commit-меседж через cursor-agent -p..." >&2
-        cursor-agent -p --force --output-format text --model "\${N7COMMIT_CURSOR_MODEL:-\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}}" "$prompt" > "$out" 2> "$err"
+        local cursor_model="\${N7COMMIT_CURSOR_MODEL:-\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}}"
+        _n7dbg "cursor-agent -p: запускаю · model=$cursor_model"
+        t0=$EPOCHREALTIME
+        cursor-agent -p --force --output-format text --model "$cursor_model" "$prompt" > "$out" 2> "$err"
         rc=$?
+        _n7dbg_agent_done "cursor-agent -p" "$t0" "$rc" "$out" "$err"
         if [[ "$rc" -eq 0 ]]; then
             [[ -s "$err" ]] && cat "$err" >&2
             rm -f "$err"
@@ -197,8 +244,11 @@ push() {
         return 1
     fi
 
+    _n7t0=$EPOCHREALTIME
     echo "⬇️  Оновлюємо origin/$branch (git fetch)..."
+    _n7dbg "git fetch origin $branch: старт"
     git fetch origin "$branch" 2> /dev/null
+    _n7dbg "git fetch: готово"
 
     # База для squash + чи це наявна origin-гілка (тоді push — fast-forward без -u).
     local base="" base_is_remote_branch=0
@@ -226,6 +276,7 @@ push() {
 
     echo "📦 Збираю всі зміни (git add -A)..."
     git add -A
+    _n7dbg "git add -A: готово · base=$base"
 
     if git diff --cached --quiet "$base" --; then
         echo "✅ Немає змін відносно $base — пушити нічого. 👋"
@@ -247,6 +298,7 @@ push() {
     # change-файлу, тіло — по булету на файл. LLM лишається ФОЛБЕКОМ: коли change-файлів немає (суть
     # визначаємо з diff) або примусово через N7COMMIT_FORCE_LLM=1 (тоді change-файли йдуть у контекст).
     local built=0
+    _n7dbg "меседж: change-файлів $(print -r -- "$changes_list" | grep -c .) · FORCE_LLM=\${N7COMMIT_FORCE_LLM:-0}"
     if [[ -n "$changes_list" && "\${N7COMMIT_FORCE_LLM:-0}" != "1" ]]; then
         echo "🧩 Збираю commit-меседж зі change-файлів (.changes/) — без LLM..." >&2
         if _n7push_build_message_from_changes "$msg" "$changes_list"; then
@@ -322,6 +374,7 @@ push() {
                 rm -f "$full"
             fi
         } > "$ctx"
+        _n7dbg "diff-контекст зібрано ($(wc -l < "$ctx" | tr -d ' ')рядк, ліміт $maxl) → виклик LLM"
 
         if ! _n7push_gen_message "$msg" "$ctx"; then
             echo "❌ Не вдалося згенерувати commit-меседж — коміт і push не виконано."
@@ -395,8 +448,11 @@ push "$1"
  * `N7COMMIT_MODEL` (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL` → `sonnet`) і `N7COMMIT_CURSOR_MODEL`
  * `N7COMMIT_PI_MODEL` (фолбек `N7MERGE_PI_MODEL`), для Claude — `N7COMMIT_MODEL`
  * (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL`), для Cursor — `N7COMMIT_CURSOR_MODEL`
- * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). Потребує zsh і git; pi/claude/cursor-agent —
- * лише для LLM-фолбеку (коли немає change-файлів або N7COMMIT_FORCE_LLM=1).
+ * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). `N7COMMIT_DEBUG=1` друкує в stderr
+ * позначений часом таймлайн етапів (fetch/add/збір контексту) і тривалість+exit code+розмір/перші рядки
+ * відповіді кожного LLM-агента — діагностика «чому push висить» (вивід у stderr, у меседж не потрапляє).
+ * Потребує zsh і git; pi/claude/cursor-agent — лише для LLM-фолбеку (коли немає change-файлів або
+ * N7COMMIT_FORCE_LLM=1).
  * @param {string} [branch] - назва гілки (дефолт — поточна)
  * @param {typeof spawn} [spawnFn] - інжект `spawn` для тестів
  * @returns {Promise<number>} exit code дочірнього zsh-процесу

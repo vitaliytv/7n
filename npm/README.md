@@ -70,6 +70,8 @@ npx @7n/n push feature-x  # origin/feature-x
 
 > **Env-кнопки фільтра шуму:** `N7COMMIT_NO_DEFAULT_EXCLUDE=1` — вимкнути дефолтні виключення; `N7COMMIT_EXCLUDE="<glob> <glob>"` — додати свої pathspec-глоби (напр. `"docs/** *.svg"`); `N7COMMIT_MAX_DIFF_LINES=<N>` — ліміт рядків diff-контексту (дефолт `1500`).
 
+> **Налагодження (чому «висить»):** `N7COMMIT_DEBUG=1` друкує в **stderr** позначений часом таймлайн кожного етапу — `git fetch` / автопідтягування дивергенції / `git add -A` / збір контексту — і, головне, **точну тривалість, exit code та розмір/перші рядки відповіді кожного LLM-агента** (`pi -p` → `claude -p` → `cursor-agent -p`). Так одразу видно, де саме затримка: довго думає модель чи агент завис на stdin/мережі/авторизації. Вивід іде в stderr, тож у сам commit-меседж не потрапляє. Приклад: `N7COMMIT_DEBUG=1 npx @7n/n push`.
+
 Потребує `zsh`, `git` і одного з агентів у `PATH` (`pi`, `claude`, `cursor-agent`).
 
 ### Як це працює: `getw`, `pull` і спільне ядро

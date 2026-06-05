@@ -127,6 +127,28 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('${(z)N7COMMIT_EXCLUDE:-}')
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_LINES:-1500}')
   })
+
+  it('N7COMMIT_DEBUG=1 вмикає позначений часом таймлайн у stderr (не в меседж)', () => {
+    // Прапорець gate-ить ОБИДВА хелпери; вивід — у stderr (>&2), щоб не потрапити в commit-меседж.
+    expect(PUSH_ZSH_SCRIPT).toContain('[[ "${N7COMMIT_DEBUG:-0}" = "1" ]] || return 0')
+    expect(PUSH_ZSH_SCRIPT).toContain('zmodload zsh/datetime')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg()')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg_agent_done()')
+  })
+
+  it('таймлайн міряє тривалість кожного агента від EPOCHREALTIME', () => {
+    // Старт фіксуємо перед викликом, тривалість рахуємо в _n7dbg_agent_done — для pi/claude/cursor.
+    expect(PUSH_ZSH_SCRIPT).toContain('t0=$EPOCHREALTIME')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg_agent_done "pi -p" "$t0" "$rc" "$out" "$err"')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg_agent_done "claude -p" "$t0" "$rc" "$out" "$err"')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg_agent_done "cursor-agent -p" "$t0" "$rc" "$out" "$err"')
+  })
+
+  it('таймлайн розмічає й детерміновані етапи (fetch/add/контекст)', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg "git fetch')
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg "git add -A: готово')
+    expect(PUSH_ZSH_SCRIPT).toContain('→ виклик LLM')
+  })
 })
 
 describe('push', () => {
