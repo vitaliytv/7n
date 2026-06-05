@@ -5,7 +5,9 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 // zsh-функція getw: через fzf обираємо git-worktree з-під .worktrees/, комітимо там зміни
 // тимчасовим комітом і накочуємо ЛИШЕ дельту цієї гілки (merge-base..target) у поточну гілку як
 // unstaged через спільне ядро `_n7merge_delta` (git apply → 3-way merge-file → mergiraf → агент;
-// merge.js), після чого видаляємо worktree і його гілку. Worktree видаляємо лише коли мерж без
+// merge.js). Worktree із порожньою дельтою (ні незакомічених змін, ні комітів поверх merge-base із
+// поточною гілкою) під час побудови списку прибираємо мовчки (worktree+гілка) — у fzf не показуємо.
+// Для обраного worktree після мерджу видаляємо worktree і його гілку — лише коли мерж без
 // невирішених маркерів; інакше зберігаємо для ручного доведення. Запускаємо в zsh зі
 // stdio:'inherit' — fzf потребує інтерактивного TTY, тож виконуємо через дочірній процес.
 const ZSH_SCRIPT = `
@@ -54,6 +56,18 @@ _getw_modified() {
     print -r -- "$t"
 }
 
+# rc 0 ⇔ дельта worktree-гілки порожня — переносити нічого: немає ні незакомічених змін у самому
+# worktree, ні комітів поверх merge-base із базовою гілкою. Саме цей кейс getw мовчки прибирає
+# (видаляє worktree+гілку), не показуючи у списку fzf. При невизначеному merge-base повертаємо
+# rc!=0 (не чіпаємо worktree), щоб ніколи не видалити те, що не змогли оцінити.
+_getw_delta_empty() {
+    local wt_path="$1" wt_branch="$2" base_branch="$3" mb
+    [[ -n "$(git -C "$wt_path" status --porcelain 2>/dev/null)" ]] && return 1
+    mb=$(git merge-base "$base_branch" "$wt_branch" 2>/dev/null)
+    [[ -z "$mb" ]] && return 1
+    git diff --quiet "$mb" "$wt_branch" 2>/dev/null
+}
+
 getw() {
     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
         echo "❌ Помилка: Ви не в Git репозиторії."
@@ -89,11 +103,22 @@ getw() {
     typeset -A wt_by_name
     local -a fzf_items
     fzf_items=( '❌_ВІДМІНА_' )
-    local wl wt_path wt_name task created modified item nl=$'\\n'
+    local wl wt_path wt_name wt_branch task created modified item nl=$'\\n'
     while IFS= read -r wl; do
         [[ -z "$wl" ]] && continue
         wt_path=$(echo "$wl" | awk '{print $1}')
         wt_name="\${wt_path:t}"
+        wt_branch=$(echo "$wl" | awk -F'[][]' '{print $2}')
+
+        # Порожня дельта (нічого переносити) — мовчки прибираємо worktree+гілку й не показуємо у списку.
+        # Поточний worktree не чіпаємо: у ньому ми стоїмо, його не видалити.
+        if [[ "$wt_path" != "$current_wt_path" && -n "$wt_branch" ]] \\
+            && _getw_delta_empty "$wt_path" "$wt_branch" "$current_branch"; then
+            git worktree remove -f "$wt_path" > /dev/null 2>&1 \\
+                && git branch -D "$wt_branch" > /dev/null 2>&1
+            continue
+        fi
+
         wt_by_name[$wt_name]="$wl"
         task=$(_getw_task_desc "$wt_path.md")
         created=$(_getw_created "$wt_path")
@@ -104,6 +129,12 @@ getw() {
         [[ -n "$modified" ]] && item="$item$nl   ✏️  Змінено:  $modified"
         fzf_items+=( "$item" )
     done <<< "$wt_list"
+
+    if (( \${#fzf_items} <= 1 )); then
+        echo "📭 Усі worktree з .worktrees мали порожню дельту — прибрано, переносити нічого."
+        echo "Гарного дня! 👋"
+        return 0
+    fi
 
     local selected=$(print -rN -- "\${fzf_items[@]}" | fzf --read0 --gap --prompt="Оберіть worktree для перенесення змін: ")
 

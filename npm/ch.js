@@ -1,93 +1,21 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { spawn } from 'node:child_process'
 import { stdout } from 'node:process'
 
-// Неінтерактивний генератор change-файлу `<ws>/.changes/YYMMDD-HHMM.md` (формат, який споживає
-// `n-cursor release`): frontmatter з `bump` + `section` (Keep a Changelog) і текст опису.
-// Повний автомат: `--message` обов'язковий, решта має дефолти (bump=minor, section=Changed) —
-// користувач править файл вручну, якщо дефолт не підходить. Інтерактиву й TTY-логіки немає.
+// Тонка обгортка над `npx @nitra/cursor change`: лише ДОПОВНЮЄ дефолтами (bump=minor,
+// section=Changed) і робить --message обов'язковим, а сам запис change-файлу (ім'я
+// YYMMDD-HHMM, анти-колізія, серіалізація) делегує каноном через npx. Спільних залежностей
+// немає — взаємодія через процесну межу. Користувач править файл вручну, якщо дефолт не той.
 
-/** Дозволені semver-бампи. */
-const BUMPS = Object.freeze(['patch', 'minor', 'major'])
-
-/** Дозволені Keep a Changelog секції. */
-const SECTIONS = Object.freeze(['Added', 'Changed', 'Fixed', 'Removed'])
-
-/** Дефолт bump, якщо `--bump` не задано (користувач править файл вручну, якщо не так). */
+/** Дефолт bump, якщо `--bump` не задано (канон валідує значення). */
 const DEFAULT_BUMP = 'minor'
 
-/** Дефолт section, якщо `--section` не задано (користувач править файл вручну, якщо не так). */
+/** Дефолт section, якщо `--section` не задано. */
 const DEFAULT_SECTION = 'Changed'
-
-/** Підкаталог зі change-файлами всередині workspace. */
-const CHANGES_DIR = '.changes'
 
 const USAGE = [
   'Використання: npx @7n/n ch --message "<опис>" [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>] [--ws <шлях>]',
-  `Без флага --bump → ${DEFAULT_BUMP}; без --section → ${DEFAULT_SECTION}. Постав флаг, якщо інакше.`
+  `Без флага --bump → ${DEFAULT_BUMP}; без --section → ${DEFAULT_SECTION}. Постав флаг, якщо інакше. Запис делегується npx @nitra/cursor change.`
 ].join('\n')
-
-/**
- * Серіалізує change-файл у формат `n-cursor` (frontmatter рівно `bump` + `section` + опис).
- * @param {{ bump: string, section: string, message: string }} entry запис
- * @returns {string} вміст файлу
- */
-export function serializeChange({ bump, section, message }) {
-  return `---\nbump: ${bump}\nsection: ${section}\n---\n${message.trim()}\n`
-}
-
-/**
- * Локальний timestamp-префікс `YYMMDD-HHMM` (нулі дозаповнені).
- * @param {number} now `Date.now()`
- * @returns {string} напр. `260603-1430`
- */
-function formatChangeTimestamp(now) {
-  const d = new Date(now)
-  const pad = n => String(n).padStart(2, '0')
-  return `${String(d.getFullYear()).slice(-2)}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
-}
-
-/**
- * Ім'я change-файлу: людино-читабельний `YYMMDD-HHMM.md`; при колізії за ту саму
- * хвилину — числовий суфікс `-2`, `-3` тощо.
- * @param {number} now `Date.now()`
- * @param {number} [sequence] послідовність колізії; `1`/без аргументу — без суфікса
- * @returns {string} `YYMMDD-HHMM.md` або `YYMMDD-HHMM-<n>.md`
- */
-export function changeFileName(now, sequence = 1) {
-  const base = formatChangeTimestamp(now)
-  return sequence > 1 ? `${base}-${sequence}.md` : `${base}.md`
-}
-
-/**
- * @param {unknown} error помилка запису
- * @returns {boolean} true, якщо файл уже існує
- */
-function isFileExistsError(error) {
-  return error instanceof Error && 'code' in error && error.code === 'EEXIST'
-}
-
-/**
- * Пише change-файл create-only, додаючи числовий суфікс лише при локальній колізії
- * (анти-колізія для паралельних агентів, що пишуть у ту саму хвилину).
- * @param {(path: string, content: string) => Promise<void>} write create-only писар (кидає `EEXIST` при колізії)
- * @param {string} dir каталог `.changes`
- * @param {string} content вміст файлу
- * @param {number} now `Date.now()`
- * @returns {Promise<string>} створене ім'я файла
- */
-async function writeUniqueChange(write, dir, content, now) {
-  for (let sequence = 1; ; sequence++) {
-    const name = changeFileName(now, sequence)
-    try {
-      await write(join(dir, name), content)
-      return name
-    } catch (error) {
-      if (isFileExistsError(error)) continue
-      throw error
-    }
-  }
-}
 
 /**
  * Парсить `--bump/--section/--message/--ws` з argv (без валідації значень).
@@ -103,33 +31,46 @@ export function parseChArgs(argv) {
 }
 
 /**
- * Доповнює відсутні `bump`/`section` дефолтами й валідує. Без інтерактиву: `message`
- * обов'язковий (інакше помилка), `bump`/`section` мають дефолти.
+ * Будує аргументи для `@nitra/cursor change`, доповнюючи відсутні `bump`/`section`
+ * дефолтами. `message` обов'язковий; валідацію значень робить канон.
  * @param {{ bump?: string, section?: string, message?: string, ws: string }} partial поля з флагів
- * @returns {{ bump: string, section: string, message: string, ws: string }} повний запис
+ * @returns {string[]} аргументи (`['change', '--bump', …, '--section', …, '--message', …]`)
  */
-export function resolveChange(partial) {
-  const bump = partial.bump ?? DEFAULT_BUMP
-  if (!BUMPS.includes(bump)) {
-    throw new Error(`bump має бути одним із ${BUMPS.join('|')} (отримано «${bump}»)`)
-  }
-  const section = partial.section ?? DEFAULT_SECTION
-  if (!SECTIONS.includes(section)) {
-    throw new Error(`section має бути одним із ${SECTIONS.join('|')} (отримано «${section}»)`)
-  }
+export function buildChangeArgs(partial) {
   const message = (partial.message ?? '').trim()
   if (message === '') throw new Error('порожній опис (--message обов’язковий)')
-  return { bump, section, message, ws: partial.ws }
+  const args = [
+    'change',
+    '--bump',
+    partial.bump ?? DEFAULT_BUMP,
+    '--section',
+    partial.section ?? DEFAULT_SECTION,
+    '--message',
+    message
+  ]
+  if (partial.ws && partial.ws !== '.') args.push('--ws', partial.ws)
+  return args
 }
 
 /**
- * `npx @7n/n ch` — неінтерактивно створює change-файл із флагів (з дефолтами bump/section).
+ * Запускає `npx @nitra/cursor <args>` зі спадковим stdio й резолвить exit-код.
+ * @param {string[]} args аргументи після `@nitra/cursor`
+ * @returns {Promise<number>} exit code
+ */
+function spawnCanon(args) {
+  return new Promise(resolve => {
+    const child = spawn('npx', ['@nitra/cursor', ...args], { stdio: 'inherit' })
+    child.on('error', () => resolve(1))
+    child.on('close', code => resolve(code ?? 1))
+  })
+}
+
+/**
+ * `npx @7n/n ch` — доповнює дефолтами й делегує створення change-файлу каноном.
  * @param {string[]} argv аргументи після `ch`
  * @param {object} [io] інжект для тестів
  * @param {(message: string) => void} [io.log] вивід
- * @param {() => number} [io.now] джерело timestamp (дефолт `Date.now`)
- * @param {(path: string, content: string) => Promise<void>} [io.writeFile] create-only писар (кидає `EEXIST` при колізії; дефолт fs `wx`)
- * @param {string} [io.cwd] корінь (дефолт `process.cwd()`)
+ * @param {(args: string[]) => Promise<number>} [io.run] запуск канону (дефолт — `npx @nitra/cursor`)
  * @returns {Promise<number>} exit code
  */
 export async function runCh(argv, io = {}) {
@@ -139,22 +80,12 @@ export async function runCh(argv, io = {}) {
     log(`❌ Бракує --message.\n${USAGE}`)
     return 1
   }
+  let args
   try {
-    const entry = resolveChange(partial)
-    const now = (io.now ?? Date.now)()
-    const cwd = io.cwd ?? process.cwd()
-    const dir = join(cwd, entry.ws, CHANGES_DIR)
-    const write =
-      io.writeFile ??
-      (async (path, content) => {
-        await mkdir(dir, { recursive: true })
-        await writeFile(path, content, { flag: 'wx' })
-      })
-    const name = await writeUniqueChange(write, dir, serializeChange(entry), now)
-    log(`✅ ${join(entry.ws, CHANGES_DIR, name)}`)
-    return 0
+    args = buildChangeArgs(partial)
   } catch (error) {
     log(`❌ ${error instanceof Error ? error.message : String(error)}`)
     return 1
   }
+  return (io.run ?? spawnCanon)(args)
 }
