@@ -15,3 +15,5 @@ dist/
 
 # Test artifacts: coverage (test.mdc)
 **/coverage/
+# @nitra/cursor (adr) — локальні артефакти Stop-hook, не коміти
+.claude/scheduled_tasks.lock
