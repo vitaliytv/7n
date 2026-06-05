@@ -48,7 +48,7 @@ describe('PUSH_ZSH_SCRIPT', () => {
 
   it('друкує subject і список файлів у stdout (без інтерактивного підтвердження)', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('📝 Commit: $subject')
-    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status')
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status "$base" --')
     expect(PUSH_ZSH_SCRIPT).not.toContain('[y/N]')
   })
 
@@ -72,11 +72,11 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/.changes/**')
     expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)*.lock')
     expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/*.d.ts')
-    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached -- . "${noise[@]}"')
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached "$base" -- . "${noise[@]}"')
   })
 
   it('повний перелік файлів (scope) дає агенту попри виключення вмісту', () => {
-    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status')
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status "$base" --')
   })
 
   it('change-файли — пріоритетне джерело меседжу, diff лише за їх відсутності', () => {
@@ -84,7 +84,14 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('if [[ -n "$changes_list" ]]; then')
     expect(PUSH_ZSH_SCRIPT).toContain('git show ":$cf"')
     // diff-фолбек (із виключенням шуму) — у гілці else, тобто коли change-файлів немає.
-    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached -- . "${noise[@]}"')
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached "$base" -- . "${noise[@]}"')
+  })
+
+  it('change_list і diff-и беруться ЯВНО проти "$base" (origin), а не неявно проти HEAD', () => {
+    // Після git add -A + git reset --soft "$base" це повна дельта origin..повний-локальний-стан:
+    // застейджене + незастейджене/untracked + локальні коміти (різниця vs origin) в одному наборі.
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-only "$base" -- | grep -F \'.changes/\'')
+    expect(PUSH_ZSH_SCRIPT).not.toMatch(/git diff --cached --name-only \| grep/)
   })
 
   it('у stdout ADR-файли згортаються в кількість, а не перелічуються поштучно', () => {

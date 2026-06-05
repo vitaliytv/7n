@@ -199,15 +199,18 @@ push() {
         noise+=( ":(exclude)$extra" )
     done
 
-    # Контекст для агента. ПРІОРИТЕТ — застейджені change-файли (.changes/*.md): вони вже описують
+    # Контекст для агента. ПРІОРИТЕТ — change-файли (.changes/*.md): вони вже описують
     # НАМІР зміни прозою (+ секцію Added/Changed/Fixed), тож суть з них чистіша за diff. diff аналізуємо
     # ЛИШЕ якщо change-файлів немає. Повний перелік файлів (scope) даємо завжди.
+    # Усі diff-и нижче — ЯВНО проти "$base" (origin/<branch> або fork-point), як і guard на рядку вище:
+    # після git add -A + git reset --soft "$base" це повна дельта origin..повний-локальний-стан, тобто
+    # охоплює застейджене + незастейджене/untracked + локальні коміти (різниця vs origin) в одному наборі.
     local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
     local changes_list
-    changes_list=$(git diff --cached --name-only | grep -F '.changes/')
+    changes_list=$(git diff --cached --name-only "$base" -- | grep -F '.changes/')
     {
         echo "# Усі змінені файли (повний перелік, scope):"
-        git diff --cached --name-status
+        git diff --cached --name-status "$base" --
         echo ""
         if [[ -n "$changes_list" ]]; then
             echo "# Change-файли (.changes/) — ПЕРШОДЖЕРЕЛО наміру коміту; будуй меседж насамперед на них"
@@ -223,7 +226,7 @@ push() {
             echo "# Change-файлів немає — визнач суть із diff (вміст шумних шляхів виключено, обрізано):"
             local full total
             full=$(mktemp)
-            git diff --cached -- . "\${noise[@]}" > "$full"
+            git diff --cached "$base" -- . "\${noise[@]}" > "$full"
             head -n "$maxl" "$full"
             total=$(wc -l < "$full")
             if (( total > maxl )); then
@@ -254,7 +257,7 @@ push() {
     echo "📂 Файли:"
     # ADR-файли (docs/adr/) не перелічуємо поштучно — друкуємо лише їх кількість, щоб не шуміти.
     local names adr_n
-    names=$(git diff --cached --name-status)
+    names=$(git diff --cached --name-status "$base" --)
     echo "$names" | grep -v 'docs/adr/' | sed 's/^/   /'
     adr_n=$(echo "$names" | grep -c 'docs/adr/')
     (( adr_n > 0 )) && echo "   📄 docs/adr/: $adr_n файл(ів)"

@@ -22,24 +22,12 @@ const USAGE = [
 ].join('\n')
 
 /**
- * Форматує момент створення у `день.місяць година:хвилини` (локальний час, нулі дозаповнені).
- * @param {number} now `Date.now()`
- * @returns {string} напр. `03.06 14:30`
- */
-export function formatCreated(now) {
-  const d = new Date(now)
-  const pad = n => String(n).padStart(2, '0')
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-/**
- * Серіалізує change-файл у формат `n-cursor`.
+ * Серіалізує change-файл у формат `n-cursor` (frontmatter рівно `bump` + `section` + опис).
  * @param {{ bump: string, section: string, message: string }} entry запис
- * @param {number} now момент створення (для поля `created` у заголовку)
  * @returns {string} вміст файлу
  */
-export function serializeChange({ bump, section, message }, now) {
-  return `---\nbump: ${bump}\nsection: ${section}\ncreated: ${formatCreated(now)}\n---\n${message.trim()}\n`
+export function serializeChange({ bump, section, message }) {
+  return `---\nbump: ${bump}\nsection: ${section}\n---\n${message.trim()}\n`
 }
 
 /**
@@ -204,7 +192,7 @@ export async function runCh(argv, io = {}) {
         await mkdir(dir, { recursive: true })
         await writeFile(path, content, { flag: 'wx' })
       })
-    const name = await writeUniqueChange(write, dir, serializeChange(entry, now), now)
+    const name = await writeUniqueChange(write, dir, serializeChange(entry), now)
     log(`✅ ${join(entry.ws, CHANGES_DIR, name)}`)
     return 0
   } catch (error) {
