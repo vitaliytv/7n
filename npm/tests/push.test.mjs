@@ -87,6 +87,28 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached "$base" -- . "${noise[@]}"')
   })
 
+  it('за наявних change-файлів меседж збирається ДЕТЕРМІНОВАНО, БЕЗ LLM', () => {
+    // Гілка: є change-файли і не форсимо LLM → деттермінований білдер замість _n7push_gen_message.
+    expect(PUSH_ZSH_SCRIPT).toContain('_n7push_build_message_from_changes')
+    expect(PUSH_ZSH_SCRIPT).toContain('if [[ -n "$changes_list" && "${N7COMMIT_FORCE_LLM:-0}" != "1" ]]; then')
+    expect(PUSH_ZSH_SCRIPT).toContain('без LLM')
+    // LLM-генерація лишається лише у фолбек-гілці built==0.
+    expect(PUSH_ZSH_SCRIPT).toContain('if [[ "$built" -eq 0 ]]; then')
+  })
+
+  it('білдер: section→emoji/type, scope зі шляхів, summary за найвищим bump, тіло — булети', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('EMOJI=(Added "✨" Changed "♻️" Fixed "🐛" Removed "🔥")')
+    expect(PUSH_ZSH_SCRIPT).toContain('TYPE=(Added feat Changed refactor Fixed fix Removed chore)')
+    expect(PUSH_ZSH_SCRIPT).toContain('BRANK=(major 3 minor 2 patch 1)')
+    expect(PUSH_ZSH_SCRIPT).toContain('cf_ws="${cf%%/.changes/*}"')
+    // Subject обрізається до 72 символів.
+    expect(PUSH_ZSH_SCRIPT).toContain('subj="${subj[1,71]}…"')
+  })
+
+  it('N7COMMIT_FORCE_LLM=1 примушує LLM навіть за наявних change-файлів', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_FORCE_LLM:-0}')
+  })
+
   it('change_list і diff-и беруться ЯВНО проти "$base" (origin), а не неявно проти HEAD', () => {
     // Після git add -A + git reset --soft "$base" це повна дельта origin..повний-локальний-стан:
     // застейджене + незастейджене/untracked + локальні коміти (різниця vs origin) в одному наборі.

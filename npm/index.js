@@ -13,7 +13,7 @@ const HELP = `@7n/n — CLI
 
 Команди:
   greet [ім'я]    Привітатися (типове ім'я — «світ»)
-  ch              Створити change-файл (.changes/) інтерактивно або з флагів (--bump/--section/--message/--ws)
+  ch              Створити change-файл (.changes/) з флагів (--message обов'язковий; bump=minor, section=Changed за замовч.)
   getw            Перенести зміни з обраного git-worktree у поточну гілку (fzf) і прибрати worktree
   pull [гілка]    Накотити дельту origin/<гілка> (дефолт — поточна) у поточне дерево як unstaged
   push [гілка]    Сквошити локальні коміти+зміни в один, згенерувати меседж (Gitmoji) і запушити origin/<гілка>

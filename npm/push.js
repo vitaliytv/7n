@@ -4,19 +4,20 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 
 // zsh-функція push: бере ВСІ локальні коміти (origin/<branch>..HEAD) + усі зміни робочого дерева
 // (staged/unstaged/untracked через `git add -A`), сквошить їх в ОДИН коміт на вершині
-// origin/<branch>, генерує commit-меседж LLM-агентом (`pi` → `claude` → `cursor-agent`,
-// українською, Gitmoji + Monorepo) і пушить
+// origin/<branch>, формує commit-меседж (українською, Gitmoji + Monorepo) і пушить
 // одним комітом. Якщо origin/<branch> має коміти, яких немає локально (дивергенція), — НЕ зупиняємось,
 // а спершу автоматично підтягуємо їхню дельту через спільне ядро `_n7merge_delta` (merge.js, та сама
 // механіка, що й pull), і лише тоді сквошимо — інакше squash затер би віддалені правки.
 // Squash робимо через `git reset --soft <base>`: parent майбутнього коміту = base, тож push до
 // наявної origin/<branch> завжди fast-forward. Підтвердження НЕ питаємо (за вимогою) — у stdout
 // друкуємо subject коміту і список файлів. Коміт — з `--no-verify` (hooks тут не потрібні).
-// Контекст для меседжу: ПРІОРИТЕТ — застейджені change-файли (.changes/*.md), бо вони вже описують
-// намір прозою (+ секцію Added/Changed/Fixed); diff аналізуємо ЛИШЕ якщо change-файлів немає. У diff-
-// фолбеку згодовуємо ПОВНИЙ перелік файлів (scope), але БЕЗ вмісту шумних шляхів (docs/** включно з
-// ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build) і обрізаний за рядками. Шум конфігурується:
-// N7COMMIT_NO_DEFAULT_EXCLUDE, N7COMMIT_EXCLUDE, N7COMMIT_MAX_DIFF_LINES. У stdout ADR згортаються в кількість.
+// Меседж: ЯКЩО є застейджені change-файли (.changes/*.md) — збираємо його ДЕТЕРМІНОВАНО, БЕЗ LLM
+// (`_n7push_build_message_from_changes`): frontmatter section → emoji/type, scope зі шляхів, summary із
+// тіла найвагомішого (за bump) change-файлу, тіло — по булету на файл. ЛИШЕ якщо change-файлів немає —
+// меседж генерує LLM-агент (`pi` → `claude` → `cursor-agent`) з diff: ПОВНИЙ перелік файлів (scope), але
+// БЕЗ вмісту шумних шляхів (docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build)
+// і обрізаний за рядками. N7COMMIT_FORCE_LLM=1 примушує LLM навіть за наявних change-файлів (тоді вони —
+// контекст). Шум: N7COMMIT_NO_DEFAULT_EXCLUDE, N7COMMIT_EXCLUDE, N7COMMIT_MAX_DIFF_LINES. ADR у stdout — кількістю.
 const ZSH_SCRIPT = `
 ${MERGE_ZSH_LIB}
 
@@ -111,6 +112,76 @@ $(cat "$ctx")"
     return 1
 }
 
+# Детерміновано (БЕЗ LLM) збирає commit-меседж зі застейджених change-файлів (.changes/*.md).
+# Frontmatter section → emoji/type (Added→✨feat, Fixed→🐛fix, Changed→♻️refactor, Removed→🔥chore);
+# scope — workspace (сегмент шляху до /.changes/) з найбільшою кількістю change-файлів; summary —
+# тіло найвагомішого change-файлу (bump major>minor>patch; ties → Added>Fixed>Changed>Removed). Тіло
+# меседжу — по одному булету на change-файл (його опис; переноси рядків згорнуто в пробіл). $1 — файл-
+# вивід для меседжу, $2 — список change-шляхів (по одному в рядку). 0 — успіх (меседж у $1); 1 —
+# жодного придатного change-файлу (тоді викликач робить LLM-фолбек).
+_n7push_build_message_from_changes() {
+    local out="$1" list="$2"
+    typeset -A EMOJI TYPE BRANK SRANK
+    EMOJI=(Added "✨" Changed "♻️" Fixed "🐛" Removed "🔥")
+    TYPE=(Added feat Changed refactor Fixed fix Removed chore)
+    BRANK=(major 3 minor 2 patch 1)
+    SRANK=(Added 4 Fixed 3 Changed 2 Removed 1)
+
+    local cf content fm section bump body oneline cf_ws score
+    local head_score=-1 head_section="" head_summary=""
+    local -a bullets
+    typeset -A ws_count
+
+    while IFS= read -r cf; do
+        [[ -z "$cf" ]] && continue
+        content=$(git show ":$cf" 2> /dev/null || cat "$cf" 2> /dev/null)
+        [[ -z "$content" ]] && continue
+        # Frontmatter — рядки між першим і другим "---"; тіло — усе після другого "---" (без провідних порожніх).
+        fm=$(print -r -- "$content" | awk 'NR==1 && /^---/ {f=1; next} f && /^---/ {exit} f {print}')
+        section=$(print -r -- "$fm" | awk -F':[[:space:]]*' '/^section:/ {print $2; exit}')
+        bump=$(print -r -- "$fm" | awk -F':[[:space:]]*' '/^bump:/ {print $2; exit}')
+        body=$(print -r -- "$content" | awk 'c>=2 {print} /^---[[:space:]]*$/ {c++}' | sed '/./,$!d')
+        oneline=$(print -r -- "$body" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ *$//')
+        [[ -z "$section" ]] && section="Changed"
+        [[ -z "$oneline" ]] && oneline="$cf"
+        bullets+=("- $oneline")
+        cf_ws="\${cf%%/.changes/*}"
+        [[ "$cf_ws" == "$cf" ]] && cf_ws="."
+        ws_count[$cf_ws]=$(( \${ws_count[$cf_ws]:-0} + 1 ))
+        score=$(( \${BRANK[$bump]:-0} * 10 + \${SRANK[$section]:-0} ))
+        if (( score > head_score )); then
+            head_score=$score; head_section="$section"; head_summary="$oneline"
+        fi
+    done <<< "$list"
+
+    (( \${#bullets} == 0 )) && return 1
+    [[ -z "$head_section" ]] && head_section="Changed"
+    [[ -z "$head_summary" ]] && head_summary="\${bullets[1]#- }"
+
+    # scope — workspace із найбільшою кількістю change-файлів (ties → перший за обходом).
+    local scope="" best=-1 k
+    for k in "\${(@k)ws_count}"; do
+        if (( ws_count[$k] > best )); then best=\${ws_count[$k]}; scope="$k"; fi
+    done
+
+    local emoji="\${EMOJI[$head_section]:-📝}" type="\${TYPE[$head_section]:-chore}" subj
+    if [[ -n "$scope" && "$scope" != "." ]]; then
+        subj="$emoji $type($scope): $head_summary"
+    else
+        subj="$emoji $type: $head_summary"
+    fi
+    # Subject ≤ 72 символи (з урахуванням emoji як одного символа в UTF-8 локалі).
+    (( \${#subj} > 72 )) && subj="\${subj[1,71]}…"
+
+    {
+        print -r -- "$subj"
+        print -r --
+        local b
+        for b in "\${bullets[@]}"; do print -r -- "$b"; done
+    } > "$out"
+    return 0
+}
+
 push() {
     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
         echo "❌ Помилка: Ви не в Git репозиторії."
@@ -164,91 +235,107 @@ push() {
     # Сквошимо локальні коміти й застейджені зміни в один: parent = base.
     git reset --soft "$base"
 
-    local ctx msg
-    ctx=$(mktemp)
+    local msg ctx=""
     msg=$(mktemp)
 
-    # Шумні шляхи: їхній ВМІСТ не потрібен агенту, щоб визначити суть коміту (самі файли лишаються
-    # в коміті — виключаємо лише з diff-контексту генерації меседжу; їхні ІМЕНА агент усе одно бачить
-    # у name-status нижче). Дефолти вимикаються N7COMMIT_NO_DEFAULT_EXCLUDE=1; додаткові pathspec-глоби
-    # (пробіл-розділені) — через env N7COMMIT_EXCLUDE.
-    local -a noise
-    noise=()
-    if [[ "\${N7COMMIT_NO_DEFAULT_EXCLUDE:-0}" != "1" ]]; then
-        noise=(
-            ':(exclude)docs/**'            # вся документація в корені (ADR, гайди) — наратив, не суть коду
-            ':(exclude)**/docs/**'         # docs/ у будь-якому під-workspace
-            ':(exclude)**/CHANGELOG.md'    # генерується CI з change-файлів
-            ':(exclude)**/.changes/**'     # change-файли (bookkeeping)
-            ':(exclude)*.lock'             # bun.lock та інші *.lock
-            ':(exclude)**/package-lock.json'
-            ':(exclude)**/pnpm-lock.yaml'
-            ':(exclude)**/yarn.lock'
-            ':(exclude)**/*.snap'          # тест-снапшоти
-            ':(exclude)**/__snapshots__/**'
-            ':(exclude)**/*.min.js'        # мініфіковане
-            ':(exclude)**/*.map'           # source maps
-            ':(exclude)**/*.d.ts'          # генеровані типи (з JSDoc)
-            ':(exclude)dist/**'            # білд-артефакти
-            ':(exclude)build/**'
-            ':(exclude)coverage/**'
-        )
-    fi
-    local extra
-    for extra in \${(z)N7COMMIT_EXCLUDE:-}; do
-        noise+=( ":(exclude)$extra" )
-    done
-
-    # Контекст для агента. ПРІОРИТЕТ — change-файли (.changes/*.md): вони вже описують
-    # НАМІР зміни прозою (+ секцію Added/Changed/Fixed), тож суть з них чистіша за diff. diff аналізуємо
-    # ЛИШЕ якщо change-файлів немає. Повний перелік файлів (scope) даємо завжди.
-    # Усі diff-и нижче — ЯВНО проти "$base" (origin/<branch> або fork-point), як і guard на рядку вище:
-    # після git add -A + git reset --soft "$base" це повна дельта origin..повний-локальний-стан, тобто
-    # охоплює застейджене + незастейджене/untracked + локальні коміти (різниця vs origin) в одному наборі.
-    local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
     local changes_list
     changes_list=$(git diff --cached --name-only "$base" -- | grep -F '.changes/')
-    {
-        echo "# Усі змінені файли (повний перелік, scope):"
-        git diff --cached --name-status "$base" --
-        echo ""
-        if [[ -n "$changes_list" ]]; then
-            echo "# Change-файли (.changes/) — ПЕРШОДЖЕРЕЛО наміру коміту; будуй меседж насамперед на них"
-            echo "# (frontmatter section ≈ type/emoji: Added→feat/✨, Fixed→fix/🐛, Changed→refactor/♻️, Removed→🔥):"
-            local cf
-            while IFS= read -r cf; do
-                [[ -z "$cf" ]] && continue
-                echo ""
-                echo "## $cf"
-                git show ":$cf" 2> /dev/null || cat "$cf" 2> /dev/null
-            done <<< "$changes_list"
-        else
-            echo "# Change-файлів немає — визнач суть із diff (вміст шумних шляхів виключено, обрізано):"
-            local full total
-            full=$(mktemp)
-            git diff --cached "$base" -- . "\${noise[@]}" > "$full"
-            head -n "$maxl" "$full"
-            total=$(wc -l < "$full")
-            if (( total > maxl )); then
-                echo ""
-                echo "# … diff обрізано: показано $maxl з $total рядків (env N7COMMIT_MAX_DIFF_LINES)."
-            fi
-            rm -f "$full"
-        fi
-    } > "$ctx"
 
-    if ! _n7push_gen_message "$msg" "$ctx"; then
-        echo "❌ Не вдалося згенерувати commit-меседж — коміт і push не виконано."
-        echo "ℹ️ Зміни вже можуть бути staged після git add -A."
-        rm -f "$ctx" "$msg"
-        return 1
+    # ПРІОРИТЕТ — change-файли (.changes/*.md): вони вже описують НАМІР зміни прозою (+ секцію
+    # Added/Changed/Fixed/Removed). Якщо вони є — збираємо commit-меседж ДЕТЕРМІНОВАНО, БЕЗ LLM
+    # (миттєво й відтворювано): section→emoji/type, scope зі шляхів, summary із тіла найвагомішого
+    # change-файлу, тіло — по булету на файл. LLM лишається ФОЛБЕКОМ: коли change-файлів немає (суть
+    # визначаємо з diff) або примусово через N7COMMIT_FORCE_LLM=1 (тоді change-файли йдуть у контекст).
+    local built=0
+    if [[ -n "$changes_list" && "\${N7COMMIT_FORCE_LLM:-0}" != "1" ]]; then
+        echo "🧩 Збираю commit-меседж зі change-файлів (.changes/) — без LLM..." >&2
+        if _n7push_build_message_from_changes "$msg" "$changes_list"; then
+            built=1
+        else
+            echo "⚠️  Жодного придатного change-файлу — фолбек на LLM." >&2
+        fi
+    fi
+
+    if [[ "$built" -eq 0 ]]; then
+        # Шумні шляхи: їхній ВМІСТ не потрібен агенту, щоб визначити суть коміту (самі файли лишаються
+        # в коміті — виключаємо лише з diff-контексту генерації меседжу; їхні ІМЕНА агент усе одно бачить
+        # у name-status нижче). Дефолти вимикаються N7COMMIT_NO_DEFAULT_EXCLUDE=1; додаткові pathspec-глоби
+        # (пробіл-розділені) — через env N7COMMIT_EXCLUDE.
+        local -a noise
+        noise=()
+        if [[ "\${N7COMMIT_NO_DEFAULT_EXCLUDE:-0}" != "1" ]]; then
+            noise=(
+                ':(exclude)docs/**'            # вся документація в корені (ADR, гайди) — наратив, не суть коду
+                ':(exclude)**/docs/**'         # docs/ у будь-якому під-workspace
+                ':(exclude)**/CHANGELOG.md'    # генерується CI з change-файлів
+                ':(exclude)**/.changes/**'     # change-файли (bookkeeping)
+                ':(exclude)*.lock'             # bun.lock та інші *.lock
+                ':(exclude)**/package-lock.json'
+                ':(exclude)**/pnpm-lock.yaml'
+                ':(exclude)**/yarn.lock'
+                ':(exclude)**/*.snap'          # тест-снапшоти
+                ':(exclude)**/__snapshots__/**'
+                ':(exclude)**/*.min.js'        # мініфіковане
+                ':(exclude)**/*.map'           # source maps
+                ':(exclude)**/*.d.ts'          # генеровані типи (з JSDoc)
+                ':(exclude)dist/**'            # білд-артефакти
+                ':(exclude)build/**'
+                ':(exclude)coverage/**'
+            )
+        fi
+        local extra
+        for extra in \${(z)N7COMMIT_EXCLUDE:-}; do
+            noise+=( ":(exclude)$extra" )
+        done
+
+        # Контекст для агента. Усі diff-и — ЯВНО проти "$base" (origin/<branch> або fork-point), як і
+        # guard вище: після git add -A + git reset --soft "$base" це повна дельта origin..повний-локальний-
+        # стан (застейджене + незастейджене/untracked + локальні коміти). Якщо change-файли все ж є (режим
+        # N7COMMIT_FORCE_LLM=1) — даємо їх як ПЕРШОДЖЕРЕЛО; інакше — diff без вмісту шумних шляхів.
+        local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
+        ctx=$(mktemp)
+        {
+            echo "# Усі змінені файли (повний перелік, scope):"
+            git diff --cached --name-status "$base" --
+            echo ""
+            if [[ -n "$changes_list" ]]; then
+                echo "# Change-файли (.changes/) — ПЕРШОДЖЕРЕЛО наміру коміту; будуй меседж насамперед на них"
+                echo "# (frontmatter section ≈ type/emoji: Added→feat/✨, Fixed→fix/🐛, Changed→refactor/♻️, Removed→🔥):"
+                local cf
+                while IFS= read -r cf; do
+                    [[ -z "$cf" ]] && continue
+                    echo ""
+                    echo "## $cf"
+                    git show ":$cf" 2> /dev/null || cat "$cf" 2> /dev/null
+                done <<< "$changes_list"
+            else
+                echo "# Change-файлів немає — визнач суть із diff (вміст шумних шляхів виключено, обрізано):"
+                local full total
+                full=$(mktemp)
+                git diff --cached "$base" -- . "\${noise[@]}" > "$full"
+                head -n "$maxl" "$full"
+                total=$(wc -l < "$full")
+                if (( total > maxl )); then
+                    echo ""
+                    echo "# … diff обрізано: показано $maxl з $total рядків (env N7COMMIT_MAX_DIFF_LINES)."
+                fi
+                rm -f "$full"
+            fi
+        } > "$ctx"
+
+        if ! _n7push_gen_message "$msg" "$ctx"; then
+            echo "❌ Не вдалося згенерувати commit-меседж — коміт і push не виконано."
+            echo "ℹ️ Зміни вже можуть бути staged після git add -A."
+            rm -f "$ctx" "$msg"
+            return 1
+        fi
     fi
 
     # Прибираємо порожні рядки на краях, щоб git не лаявся на порожній subject.
     local subject=$(grep -m1 -v '^[[:space:]]*$' "$msg")
     if [[ -z "$subject" ]]; then
-        echo "❌ Агент повернув порожній меседж — нічого не закомічено."
-        rm -f "$ctx" "$msg"
+        echo "❌ Порожній commit-меседж — нічого не закомічено."
+        rm -f \${ctx:+"$ctx"} "$msg"
         return 1
     fi
 
@@ -265,10 +352,10 @@ push() {
 
     if ! git commit --no-verify -F "$msg" > /dev/null; then
         echo "❌ git commit не вдався."
-        rm -f "$ctx" "$msg"
+        rm -f \${ctx:+"$ctx"} "$msg"
         return 1
     fi
-    rm -f "$ctx" "$msg"
+    rm -f \${ctx:+"$ctx"} "$msg"
 
     echo "🚀 Пушу origin/$branch одним комітом..."
     if [[ "$base_is_remote_branch" -eq 1 ]]; then
@@ -290,22 +377,26 @@ push "$1"
 
 /**
  * Сквошить усі локальні коміти (`origin/<branch>..HEAD`) разом зі змінами робочого дерева
- * (`git add -A` — staged/unstaged/untracked) в ОДИН коміт на вершині `origin/<branch>`, генерує
- * commit-меседж LLM-агентом (`pi` → `claude` → `cursor-agent`, українською, Gitmoji + Monorepo) і
+ * (`git add -A` — staged/unstaged/untracked) в ОДИН коміт на вершині `origin/<branch>`, формує
+ * commit-меседж (українською, Gitmoji + Monorepo) і
  * пушить його одним комітом. За
  * дивергенції (origin має коміти, яких немає локально) спершу автоматично підтягує їхню дельту тим
  * самим ядром, що й pull (`_n7merge_delta`, merge.js), тож віддалені правки не затираються; squash
  * робиться через `git reset --soft <base>`, тож push до наявної гілки — fast-forward. Підтвердження не
  * питає: у stdout друкує subject коміту і список файлів (ADR-файли — згорнуті в кількість). Коміт — з
- * `--no-verify`. Меседж будується насамперед на застейджених change-файлах (`.changes/*.md`) — вони
- * описують намір прозою; diff аналізується лише за їх відсутності (тоді — повний перелік файлів +
+ * `--no-verify`. ЯКЩО є застейджені change-файли (`.changes/*.md`) — меседж збирається ДЕТЕРМІНОВАНО,
+ * БЕЗ LLM (`_n7push_build_message_from_changes`): frontmatter `section` → emoji/type, scope зі шляхів,
+ * summary із тіла найвагомішого (за `bump`) change-файлу, тіло — по булету на файл. ЛИШЕ за відсутності
+ * change-файлів меседж генерує LLM-агент (`pi` → `claude` → `cursor-agent`) з diff (повний перелік файлів +
  * diff БЕЗ вмісту шумних шляхів: docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots,
- * build, обрізаний). Шум конфігурується env `N7COMMIT_NO_DEFAULT_EXCLUDE`, `N7COMMIT_EXCLUDE`,
- * `N7COMMIT_MAX_DIFF_LINES`. Модель агента — env
+ * build, обрізаний). `N7COMMIT_FORCE_LLM=1` примушує LLM навіть за наявних change-файлів (вони стають
+ * контекстом). Шум конфігурується env `N7COMMIT_NO_DEFAULT_EXCLUDE`, `N7COMMIT_EXCLUDE`,
+ * `N7COMMIT_MAX_DIFF_LINES`. Модель LLM-агента (лише для фолбеку) — env
  * `N7COMMIT_MODEL` (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL` → `sonnet`) і `N7COMMIT_CURSOR_MODEL`
  * `N7COMMIT_PI_MODEL` (фолбек `N7MERGE_PI_MODEL`), для Claude — `N7COMMIT_MODEL`
  * (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL`), для Cursor — `N7COMMIT_CURSOR_MODEL`
- * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). Потребує zsh, git і pi/claude/cursor-agent.
+ * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). Потребує zsh і git; pi/claude/cursor-agent —
+ * лише для LLM-фолбеку (коли немає change-файлів або N7COMMIT_FORCE_LLM=1).
  * @param {string} [branch] - назва гілки (дефолт — поточна)
  * @param {typeof spawn} [spawnFn] - інжект `spawn` для тестів
  * @returns {Promise<number>} exit code дочірнього zsh-процесу

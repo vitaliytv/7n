@@ -1,19 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { changeFileName, collectChange, parseChArgs, runCh, serializeChange } from '../ch.js'
+import { changeFileName, parseChArgs, resolveChange, runCh, serializeChange } from '../ch.js'
 import { run } from '../index.js'
 
 const BUMP_ERR_RE = /bump/
-
-/**
- * Скриптований prompt: повертає відповіді по черзі, далі — порожній рядок.
- * @param {string[]} answers черга відповідей
- * @returns {() => Promise<string>} prompt-функція
- */
-function scriptedPrompt(answers) {
-  const queue = [...answers]
-  return () => Promise.resolve(queue.shift() ?? '')
-}
+const SECTION_ERR_RE = /section/
+const MESSAGE_ERR_RE = /опис/
 
 /**
  * Колектор виводу для інжекту у `log`.
@@ -61,53 +53,74 @@ describe('parseChArgs', () => {
   })
 })
 
-describe('collectChange', () => {
-  it('повний інтерактив: номери меню + опис', async () => {
-    const prompt = scriptedPrompt(['2', '1', 'мій опис'])
-    const entry = await collectChange({ ws: '.' }, { prompt, log: collector().log })
-    expect(entry).toEqual({ bump: 'minor', section: 'Added', message: 'мій опис', ws: '.' })
+describe('resolveChange', () => {
+  it('дефолти: без bump/section → minor/Changed', () => {
+    expect(resolveChange({ message: 'опис', ws: '.' })).toEqual({
+      bump: 'minor',
+      section: 'Changed',
+      message: 'опис',
+      ws: '.'
+    })
   })
 
-  it('частковий: задані bump/section з флагів, питається лише опис', async () => {
-    const prompt = scriptedPrompt(['опис'])
-    const entry = await collectChange({ bump: 'patch', section: 'Fixed', ws: 'npm' }, { prompt, log: collector().log })
-    expect(entry).toEqual({ bump: 'patch', section: 'Fixed', message: 'опис', ws: 'npm' })
+  it('флаги перекривають дефолти й trim-ить опис', () => {
+    expect(resolveChange({ bump: 'patch', section: 'Fixed', message: '  фікс  ', ws: 'npm' })).toEqual({
+      bump: 'patch',
+      section: 'Fixed',
+      message: 'фікс',
+      ws: 'npm'
+    })
   })
 
-  it('невалідний bump із флага → помилка', async () => {
-    await expect(
-      collectChange({ bump: 'huge', ws: '.' }, { prompt: scriptedPrompt([]), log: collector().log })
-    ).rejects.toThrow(BUMP_ERR_RE)
+  it('невалідний bump → помилка', () => {
+    expect(() => resolveChange({ bump: 'huge', message: 'x', ws: '.' })).toThrow(BUMP_ERR_RE)
   })
 
-  it('повторний запит при невалідному виборі, потім назва', async () => {
-    const io = collector()
-    const prompt = scriptedPrompt(['9', 'major', '1', 'x'])
-    const entry = await collectChange({ ws: '.' }, { prompt, log: io.log })
-    expect(entry.bump).toBe('major')
-    expect(io.lines.join('\n')).toContain('Невалідний вибір')
+  it('невалідний section → помилка', () => {
+    expect(() => resolveChange({ section: 'Nope', message: 'x', ws: '.' })).toThrow(SECTION_ERR_RE)
   })
 
-  it('повторний запит при порожньому описі', async () => {
-    const prompt = scriptedPrompt(['', 'нарешті'])
-    const entry = await collectChange({ bump: 'patch', section: 'Added', ws: '.' }, { prompt, log: collector().log })
-    expect(entry.message).toBe('нарешті')
+  it('порожній опис → помилка', () => {
+    expect(() => resolveChange({ message: '   ', ws: '.' })).toThrow(MESSAGE_ERR_RE)
   })
 })
 
 describe('runCh', () => {
-  it('без TTY і без повного набору флагів → 1 + usage', async () => {
+  it('без --message → 1 + usage', async () => {
     const io = collector()
-    const code = await runCh(['--bump', 'minor'], { log: io.log, isTTY: false })
+    const code = await runCh(['--bump', 'minor'], { log: io.log })
     expect(code).toBe(1)
-    expect(io.lines.join('\n')).toContain('stdin не інтерактивний')
+    expect(io.lines.join('\n')).toContain('Бракує --message')
+  })
+
+  it('лише --message → дефолти minor/Changed, пише файл і повертає 0', async () => {
+    const now = new Date(2026, 5, 3, 14, 30).getTime()
+    const writes = []
+    const io = collector()
+    const code = await runCh(['--message', 'опис'], {
+      log: io.log,
+      now: () => now,
+      cwd: '/repo',
+      writeFile: (path, content) => {
+        writes.push({ path, content })
+        return Promise.resolve()
+      }
+    })
+    expect(code).toBe(0)
+    expect(writes).toEqual([
+      {
+        path: '/repo/.changes/260603-1430.md',
+        content: '---\nbump: minor\nsection: Changed\n---\nопис\n'
+      }
+    ])
+    expect(io.lines).toEqual(['✅ .changes/260603-1430.md'])
   })
 
   it('повний набір флагів → пише файл у <ws>/.changes і повертає 0', async () => {
     const now = new Date(2026, 5, 3, 14, 30).getTime()
     const writes = []
     const io = collector()
-    const code = await runCh(['--bump', 'minor', '--section', 'Added', '--message', 'опис', '--ws', 'npm'], {
+    const code = await runCh(['--bump', 'patch', '--section', 'Added', '--message', 'опис', '--ws', 'npm'], {
       log: io.log,
       now: () => now,
       cwd: '/repo',
@@ -120,7 +133,7 @@ describe('runCh', () => {
     expect(writes).toEqual([
       {
         path: '/repo/npm/.changes/260603-1430.md',
-        content: '---\nbump: minor\nsection: Added\n---\nопис\n'
+        content: '---\nbump: patch\nsection: Added\n---\nопис\n'
       }
     ])
     expect(io.lines).toEqual(['✅ npm/.changes/260603-1430.md'])
@@ -131,7 +144,7 @@ describe('runCh', () => {
     const existing = new Set(['/repo/.changes/260603-1430.md', '/repo/.changes/260603-1430-2.md'])
     const writes = []
     const io = collector()
-    const code = await runCh(['--bump', 'patch', '--section', 'Fixed', '--message', 'фікс'], {
+    const code = await runCh(['--message', 'фікс'], {
       log: io.log,
       now: () => now,
       cwd: '/repo',
@@ -149,31 +162,13 @@ describe('runCh', () => {
     expect(writes).toEqual(['/repo/.changes/260603-1430-3.md'])
     expect(io.lines).toEqual(['✅ .changes/260603-1430-3.md'])
   })
-
-  it("інтерактив через ін'єкцію prompt пише файл", async () => {
-    const now = new Date(2026, 0, 5, 9, 7).getTime()
-    const writes = []
-    const code = await runCh([], {
-      log: collector().log,
-      prompt: scriptedPrompt(['1', '2', 'інтерактивний опис']),
-      now: () => now,
-      cwd: '/r',
-      writeFile: (path, content) => {
-        writes.push({ path, content })
-        return Promise.resolve()
-      }
-    })
-    expect(code).toBe(0)
-    expect(writes[0].path).toBe('/r/.changes/260105-0907.md')
-    expect(writes[0].content).toBe('---\nbump: patch\nsection: Changed\n---\nінтерактивний опис\n')
-  })
 })
 
 describe('run → ch', () => {
   it('делегує ch у runCh через спільний io', async () => {
     const now = new Date(2026, 5, 3, 14, 30).getTime()
     const writes = []
-    const code = await run(['ch', '--bump', 'patch', '--section', 'Fixed', '--message', 'фікс'], {
+    const code = await run(['ch', '--message', 'фікс'], {
       log: collector().log,
       now: () => now,
       cwd: '/x',
