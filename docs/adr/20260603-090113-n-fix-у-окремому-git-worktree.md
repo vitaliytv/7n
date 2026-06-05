@@ -33,3 +33,7 @@ Chosen option: "Виконання `n-fix` у ізольованому git-workt
 - Команда перевірки наявних версій: `npm view @nitra/cursor versions --json`
 - Остання реальна версія на момент сесії: `3.18.1`; `@latest` розрезолвувався у `3.18.2` (неіснуюча у реєстрі)
 - Правило `fix adr` перевіряє `package.json` і вимагає `@nitra/cursor` ≥ `^3.18.1`
+
+## Update 2026-06-03
+
+Підтвердження preflight в реальному запуску: `git rev-parse --show-toplevel && git branch --show-current` виявило запуск у `main`; worktree автоматично створено командою `npx @nitra/cursor worktree add "main-fix" "n-fix: worktree-only skill"` за шляхом `/Users/vitalii/www/vitaliytv/7n/.worktrees/main-fix`. Перевірені артефакти: `.claude/hooks/capture-decisions.sh`, `.claude/hooks/normalize-decisions.sh` — збіглися з канонічними. Результат: всі перевірки `✅`, робоче дерево чисте.

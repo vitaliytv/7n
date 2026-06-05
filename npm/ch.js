@@ -1,10 +1,9 @@
-import { randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
 
-// Інтерактивний генератор change-файлу `<ws>/.changes/<ts>-<rand>.md` (формат, який споживає
+// Інтерактивний генератор change-файлу `<ws>/.changes/YYMMDD-HHMM.md` (формат, який споживає
 // `n-cursor release`): frontmatter з `bump` + `section` (Keep a Changelog) і текст опису.
 // Гібрид: задані флаги беруться як є, питається лише відсутнє. Без TTY і без флагів — не зависає.
 
@@ -44,13 +43,56 @@ export function serializeChange({ bump, section, message }, now) {
 }
 
 /**
- * Ім'я нового change-файлу: timestamp (порядок) + rand (анти-колізія).
+ * Локальний timestamp-префікс `YYMMDD-HHMM` (нулі дозаповнені).
  * @param {number} now `Date.now()`
- * @param {string} rand короткий hex-суфікс
- * @returns {string} `<now>-<rand>.md`
+ * @returns {string} напр. `260603-1430`
  */
-export function changeFileName(now, rand) {
-  return `${now}-${rand}.md`
+function formatChangeTimestamp(now) {
+  const d = new Date(now)
+  const pad = n => String(n).padStart(2, '0')
+  return `${String(d.getFullYear()).slice(-2)}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
+}
+
+/**
+ * Ім'я change-файлу: людино-читабельний `YYMMDD-HHMM.md`; при колізії за ту саму
+ * хвилину — числовий суфікс `-2`, `-3` тощо.
+ * @param {number} now `Date.now()`
+ * @param {number} [sequence] послідовність колізії; `1`/без аргументу — без суфікса
+ * @returns {string} `YYMMDD-HHMM.md` або `YYMMDD-HHMM-<n>.md`
+ */
+export function changeFileName(now, sequence = 1) {
+  const base = formatChangeTimestamp(now)
+  return sequence > 1 ? `${base}-${sequence}.md` : `${base}.md`
+}
+
+/**
+ * @param {unknown} error помилка запису
+ * @returns {boolean} true, якщо файл уже існує
+ */
+function isFileExistsError(error) {
+  return error instanceof Error && 'code' in error && error.code === 'EEXIST'
+}
+
+/**
+ * Пише change-файл create-only, додаючи числовий суфікс лише при локальній колізії
+ * (анти-колізія для паралельних агентів, що пишуть у ту саму хвилину).
+ * @param {(path: string, content: string) => Promise<void>} write create-only писар (кидає `EEXIST` при колізії)
+ * @param {string} dir каталог `.changes`
+ * @param {string} content вміст файлу
+ * @param {number} now `Date.now()`
+ * @returns {Promise<string>} створене ім'я файла
+ */
+async function writeUniqueChange(write, dir, content, now) {
+  for (let sequence = 1; ; sequence++) {
+    const name = changeFileName(now, sequence)
+    try {
+      await write(join(dir, name), content)
+      return name
+    } catch (error) {
+      if (isFileExistsError(error)) continue
+      throw error
+    }
+  }
 }
 
 /**
@@ -134,8 +176,7 @@ export async function collectChange(partial, io) {
  * @param {(question: string) => Promise<string>} [io.prompt] запит рядка (тести); інакше readline по TTY
  * @param {boolean} [io.isTTY] чи інтерактивний stdin (дефолт `stdin.isTTY`)
  * @param {() => number} [io.now] джерело timestamp (дефолт `Date.now`)
- * @param {() => string} [io.rand] джерело суфікса (дефолт 3 random-байти hex)
- * @param {(path: string, content: string) => Promise<void>} [io.writeFile] писар (дефолт fs)
+ * @param {(path: string, content: string) => Promise<void>} [io.writeFile] create-only писар (кидає `EEXIST` при колізії; дефолт fs `wx`)
  * @param {string} [io.cwd] корінь (дефолт `process.cwd()`)
  * @returns {Promise<number>} exit code
  */
@@ -155,19 +196,16 @@ export async function runCh(argv, io = {}) {
   try {
     const entry = await collectChange(partial, { prompt, log })
     const now = (io.now ?? Date.now)()
-    const rand = (io.rand ?? (() => randomBytes(3).toString('hex')))()
-    const name = changeFileName(now, rand)
     const cwd = io.cwd ?? process.cwd()
     const dir = join(cwd, entry.ws, CHANGES_DIR)
-    const rel = join(entry.ws, CHANGES_DIR, name)
     const write =
       io.writeFile ??
       (async (path, content) => {
         await mkdir(dir, { recursive: true })
-        await writeFile(path, content)
+        await writeFile(path, content, { flag: 'wx' })
       })
-    await write(join(dir, name), serializeChange(entry, now))
-    log(`✅ ${rel}`)
+    const name = await writeUniqueChange(write, dir, serializeChange(entry, now), now)
+    log(`✅ ${join(entry.ws, CHANGES_DIR, name)}`)
     return 0
   } catch (error) {
     log(`❌ ${error instanceof Error ? error.message : String(error)}`)

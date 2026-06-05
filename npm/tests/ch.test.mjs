@@ -40,8 +40,16 @@ describe('formatCreated', () => {
 })
 
 describe('changeFileName', () => {
-  it('формат <now>-<rand>.md', () => {
-    expect(changeFileName(1000, 'deadbe')).toBe('1000-deadbe.md')
+  const now = new Date(2026, 5, 3, 14, 30).getTime()
+
+  it('формат YYMMDD-HHMM.md без суфікса для першої послідовності', () => {
+    expect(changeFileName(now)).toBe('260603-1430.md')
+    expect(changeFileName(now, 1)).toBe('260603-1430.md')
+  })
+
+  it('числовий суфікс при колізії', () => {
+    expect(changeFileName(now, 2)).toBe('260603-1430-2.md')
+    expect(changeFileName(now, 3)).toBe('260603-1430-3.md')
   })
 })
 
@@ -103,12 +111,12 @@ describe('runCh', () => {
   })
 
   it('повний набір флагів → пише файл у <ws>/.changes і повертає 0', async () => {
+    const now = new Date(2026, 5, 3, 14, 30).getTime()
     const writes = []
     const io = collector()
     const code = await runCh(['--bump', 'minor', '--section', 'Added', '--message', 'опис', '--ws', 'npm'], {
       log: io.log,
-      now: () => 1000,
-      rand: () => 'deadbe',
+      now: () => now,
       cwd: '/repo',
       writeFile: (path, content) => {
         writes.push({ path, content })
@@ -118,20 +126,44 @@ describe('runCh', () => {
     expect(code).toBe(0)
     expect(writes).toEqual([
       {
-        path: '/repo/npm/.changes/1000-deadbe.md',
-        content: `---\nbump: minor\nsection: Added\ncreated: ${formatCreated(1000)}\n---\nопис\n`
+        path: '/repo/npm/.changes/260603-1430.md',
+        content: `---\nbump: minor\nsection: Added\ncreated: ${formatCreated(now)}\n---\nопис\n`
       }
     ])
-    expect(io.lines).toEqual(['✅ npm/.changes/1000-deadbe.md'])
+    expect(io.lines).toEqual(['✅ npm/.changes/260603-1430.md'])
+  })
+
+  it('колізія за ту саму хвилину → числовий суфікс через create-only', async () => {
+    const now = new Date(2026, 5, 3, 14, 30).getTime()
+    const existing = new Set(['/repo/.changes/260603-1430.md', '/repo/.changes/260603-1430-2.md'])
+    const writes = []
+    const io = collector()
+    const code = await runCh(['--bump', 'patch', '--section', 'Fixed', '--message', 'фікс'], {
+      log: io.log,
+      now: () => now,
+      cwd: '/repo',
+      writeFile: path => {
+        if (existing.has(path)) {
+          const error = new Error('EEXIST')
+          error.code = 'EEXIST'
+          return Promise.reject(error)
+        }
+        writes.push(path)
+        return Promise.resolve()
+      }
+    })
+    expect(code).toBe(0)
+    expect(writes).toEqual(['/repo/.changes/260603-1430-3.md'])
+    expect(io.lines).toEqual(['✅ .changes/260603-1430-3.md'])
   })
 
   it("інтерактив через ін'єкцію prompt пише файл", async () => {
+    const now = new Date(2026, 0, 5, 9, 7).getTime()
     const writes = []
     const code = await runCh([], {
       log: collector().log,
       prompt: scriptedPrompt(['1', '2', 'інтерактивний опис']),
-      now: () => 42,
-      rand: () => 'beef00',
+      now: () => now,
       cwd: '/r',
       writeFile: (path, content) => {
         writes.push({ path, content })
@@ -139,20 +171,20 @@ describe('runCh', () => {
       }
     })
     expect(code).toBe(0)
-    expect(writes[0].path).toBe('/r/.changes/42-beef00.md')
+    expect(writes[0].path).toBe('/r/.changes/260105-0907.md')
     expect(writes[0].content).toBe(
-      `---\nbump: patch\nsection: Changed\ncreated: ${formatCreated(42)}\n---\nінтерактивний опис\n`
+      `---\nbump: patch\nsection: Changed\ncreated: ${formatCreated(now)}\n---\nінтерактивний опис\n`
     )
   })
 })
 
 describe('run → ch', () => {
   it('делегує ch у runCh через спільний io', async () => {
+    const now = new Date(2026, 5, 3, 14, 30).getTime()
     const writes = []
     const code = await run(['ch', '--bump', 'patch', '--section', 'Fixed', '--message', 'фікс'], {
       log: collector().log,
-      now: () => 7,
-      rand: () => 'aa',
+      now: () => now,
       cwd: '/x',
       writeFile: (path, content) => {
         writes.push({ path, content })
@@ -160,6 +192,6 @@ describe('run → ch', () => {
       }
     })
     expect(code).toBe(0)
-    expect(writes[0].path).toBe('/x/.changes/7-aa.md')
+    expect(writes[0].path).toBe('/x/.changes/260603-1430.md')
   })
 })
