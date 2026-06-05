@@ -28,6 +28,32 @@ _getw_task_desc() {
     done < "$md"
 }
 
+# Друкує дату й час СТВОРЕННЯ worktree (YYYY-MM-DD HH:MM) — birth time директорії, тобто момент
+# git worktree add (macOS-stat). Якщо birth time недоступний — падаємо на mtime директорії.
+_getw_created() {
+    local dir="$1" t
+    [[ -d "$dir" ]] || return 0
+    t=$(stat -f '%SB' -t '%Y-%m-%d %H:%M' "$dir" 2>/dev/null)
+    [[ -z "$t" || "$t" == '-' ]] && t=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$dir" 2>/dev/null)
+    print -r -- "$t"
+}
+
+# Друкує дату й час ОСТАННЬОЇ ЗМІНИ у worktree (YYYY-MM-DD HH:MM) — mtime найсвіжішого файлу
+# (без .git та node_modules), бо це відображає реальну активність. Якщо файлів немає — падаємо
+# на mtime самої директорії.
+_getw_modified() {
+    local dir="$1" newest t
+    [[ -d "$dir" ]] || return 0
+    newest=$(find "$dir" -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -print0 2>/dev/null \\
+        | xargs -0 stat -f '%m' 2>/dev/null | sort -rn | head -1)
+    if [[ -n "$newest" ]]; then
+        t=$(date -r "$newest" '+%Y-%m-%d %H:%M' 2>/dev/null)
+    else
+        t=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$dir" 2>/dev/null)
+    fi
+    print -r -- "$t"
+}
+
 getw() {
     if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
         echo "❌ Помилка: Ви не в Git репозиторії."
@@ -63,18 +89,20 @@ getw() {
     typeset -A wt_by_name
     local -a fzf_items
     fzf_items=( '❌_ВІДМІНА_' )
-    local wl wt_path wt_name task nl=$'\\n'
+    local wl wt_path wt_name task created modified item nl=$'\\n'
     while IFS= read -r wl; do
         [[ -z "$wl" ]] && continue
         wt_path=$(echo "$wl" | awk '{print $1}')
         wt_name="\${wt_path:t}"
         wt_by_name[$wt_name]="$wl"
         task=$(_getw_task_desc "$wt_path.md")
-        if [[ -n "$task" ]]; then
-            fzf_items+=( "$wt_name$nl   Задача: $task" )
-        else
-            fzf_items+=( "$wt_name" )
-        fi
+        created=$(_getw_created "$wt_path")
+        modified=$(_getw_modified "$wt_path")
+        item="$wt_name"
+        [[ -n "$task" ]] && item="$item$nl   Задача: $task"
+        [[ -n "$created" ]] && item="$item$nl   🕒 Створено: $created"
+        [[ -n "$modified" ]] && item="$item$nl   ✏️  Змінено:  $modified"
+        fzf_items+=( "$item" )
     done <<< "$wt_list"
 
     local selected=$(print -rN -- "\${fzf_items[@]}" | fzf --read0 --gap --prompt="Оберіть worktree для перенесення змін: ")
