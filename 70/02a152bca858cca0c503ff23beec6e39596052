@@ -1,0 +1,19 @@
+npm/.changes/260609-0653.md
+  s_6184367c21bf9d::t_29bd9c95488537 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7002a152bca858cca0c503ff23beec6e39596052",
+  "prompts": {},
+  "sessions": {
+    "s_6184367c21bf9d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ea7b3-fe7c-7741-9eed-c6e046f83414",
+        "model": "gpt-5.4-mini"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
