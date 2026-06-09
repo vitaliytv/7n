@@ -23,7 +23,6 @@
     "adr-normalize",
     "coverage-fix",
     "fix",
-    "fix-tests",
     "lint",
     "llm-patch",
     "publish-telegram",

@@ -21,25 +21,26 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 const ZSH_SCRIPT = `
 ${MERGE_ZSH_LIB}
 
-# ── Налагодження (N7COMMIT_DEBUG=1) ──────────────────────────────────────────
+# ── Налагодження (увімкнено за замовчуванням; вимкнути N7COMMIT_DEBUG=0) ──────
 # Друкує позначені часом діагностичні рядки у stderr (щоб НЕ потрапити в commit-
-# меседж, який збирається у stdout/файл) — лише за N7COMMIT_DEBUG=1. Мета: бачити,
-# на якому етапі push «висить» і скільки реально триває кожен виклик LLM-агента.
+# меседж, який збирається у stdout/файл). Увімкнено за замовчуванням — вимкнути
+# можна лише явним N7COMMIT_DEBUG=0. Мета: бачити, на якому етапі push «висить»
+# і скільки реально триває кожен виклик LLM-агента.
 # Час відлічуємо від старту push (_n7t0, EPOCHREALTIME — монотонний float-час zsh).
 zmodload zsh/datetime 2> /dev/null
 typeset -g _n7t0=\${EPOCHREALTIME:-0}
 
 _n7dbg() {
-    [[ "\${N7COMMIT_DEBUG:-0}" = "1" ]] || return 0
+    [[ "\${N7COMMIT_DEBUG:-1}" != "0" ]] || return 0
     printf '🔎 [%7.2fs] %s\\n' "$(( EPOCHREALTIME - _n7t0 ))" "$*" >&2
 }
 
-# Підсумок виклику LLM-агента (лише за N7COMMIT_DEBUG=1): rc, тривалість, розмір
+# Підсумок виклику LLM-агента (за замовчуванням; вимкнути N7COMMIT_DEBUG=0): rc, тривалість, розмір
 # і перші рядки stdout/stderr — щоб відрізнити «модель довго думає» від «агент
 # завис на stdin/мережі/авторизації». $1 — мітка, $2 — старт (EPOCHREALTIME),
 # $3 — rc, $4 — stdout-файл, $5 — stderr-файл.
 _n7dbg_agent_done() {
-    [[ "\${N7COMMIT_DEBUG:-0}" = "1" ]] || return 0
+    [[ "\${N7COMMIT_DEBUG:-1}" != "0" ]] || return 0
     local label="$1" start="$2" rc="$3" out="$4" err="$5"
     local obytes=0 olines=0 ebytes=0
     [[ -f "$out" ]] && { obytes=$(wc -c < "$out" | tr -d ' '); olines=$(wc -l < "$out" | tr -d ' '); }
@@ -448,9 +449,10 @@ push "$1"
  * `N7COMMIT_MODEL` (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL` → `sonnet`) і `N7COMMIT_CURSOR_MODEL`
  * `N7COMMIT_PI_MODEL` (фолбек `N7MERGE_PI_MODEL`), для Claude — `N7COMMIT_MODEL`
  * (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL`), для Cursor — `N7COMMIT_CURSOR_MODEL`
- * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). `N7COMMIT_DEBUG=1` друкує в stderr
+ * (фолбек `N7MERGE_CURSOR_MODEL` → `GETW_MERGE_CURSOR_MODEL`). За замовчуванням друкує в stderr
  * позначений часом таймлайн етапів (fetch/add/збір контексту) і тривалість+exit code+розмір/перші рядки
- * відповіді кожного LLM-агента — діагностика «чому push висить» (вивід у stderr, у меседж не потрапляє).
+ * відповіді кожного LLM-агента — діагностика «чому push висить» (вивід у stderr, у меседж не потрапляє);
+ * вимкнути можна явним `N7COMMIT_DEBUG=0`.
  * Потребує zsh і git; pi/claude/cursor-agent — лише для LLM-фолбеку (коли немає change-файлів або
  * N7COMMIT_FORCE_LLM=1).
  * @param {string} [branch] - назва гілки (дефолт — поточна)

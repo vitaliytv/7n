@@ -128,9 +128,10 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_LINES:-1500}')
   })
 
-  it('N7COMMIT_DEBUG=1 вмикає позначений часом таймлайн у stderr (не в меседж)', () => {
-    // Прапорець gate-ить ОБИДВА хелпери; вивід — у stderr (>&2), щоб не потрапити в commit-меседж.
-    expect(PUSH_ZSH_SCRIPT).toContain('[[ "${N7COMMIT_DEBUG:-0}" = "1" ]] || return 0')
+  it('таймлайн увімкнено за замовчуванням, вимикається лише явним N7COMMIT_DEBUG=0', () => {
+    // Дефолт :-1 → активно без env; гейт пропускає вивід, лише коли значення явно "0".
+    expect(PUSH_ZSH_SCRIPT).toContain('[[ "${N7COMMIT_DEBUG:-1}" != "0" ]] || return 0')
+    expect(PUSH_ZSH_SCRIPT).not.toContain('${N7COMMIT_DEBUG:-0}')
     expect(PUSH_ZSH_SCRIPT).toContain('zmodload zsh/datetime')
     expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg()')
     expect(PUSH_ZSH_SCRIPT).toContain('_n7dbg_agent_done()')
