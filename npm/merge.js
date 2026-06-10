@@ -3,7 +3,9 @@ import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 
 // Шлях до Tier-3 omlx-резолвера; передаємо в zsh як N7MERGE_RESOLVER (Tier 3 шелл-аутить `node $…`).
-const RESOLVER_PATH = fileURLToPath(new URL('omlx-resolve.js', import.meta.url))
+// .mjs — щоб Node визначав ESM за розширенням і НЕ читав package.json (який під час мерджу може мати
+// конфліктні маркери → ERR_INVALID_PACKAGE_CONFIG ще до резолву).
+const RESOLVER_PATH = fileURLToPath(new URL('omlx-resolve.mjs', import.meta.url))
 
 // Спільне ядро delta-мерджу для getw і pull. Обидві команди переносять у поточне робоче дерево
 // як unstaged ЛИШЕ дельту merge-base(ours, src)..src (а не весь зріз src через `git checkout`), щоб

@@ -126,7 +126,7 @@ describe('runZsh', () => {
     })
     await runZsh('echo hi', spawnFn, [])
     const opts = spawnFn.mock.calls[0][2]
-    expect(opts.env.N7MERGE_RESOLVER).toMatch(/omlx-resolve\.js$/)
+    expect(opts.env.N7MERGE_RESOLVER).toMatch(/omlx-resolve\.mjs$/)
   })
 
   it('exit без коду → 0', async () => {

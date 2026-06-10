@@ -1,4 +1,4 @@
-import { loadOmlxConfig, resolveFiles } from './omlx.js'
+import { loadOmlxConfig, resolveFiles } from './omlx.mjs'
 
 // CLI-ентрі Tier-3 резолву для zsh-ядра (_n7merge_resolve_with_agent шелл-аутить сюди як
 // `node omlx-resolve.js <files…>`). Редагує файли in-place через локальний omlx і друкує per-file
