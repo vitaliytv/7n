@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.0] - 2026-06-10
+
+### Changed
+
+- pull: коли FF неможливий — reverse-delta (HEAD → origin, локальна робота як unstaged тим самим _n7merge_delta з оберненими ролями; ours=origin, src=знімок), зі страховкою бекап + trap на відкат
+
 ## [0.5.0] - 2026-06-10
 
 ### Changed
