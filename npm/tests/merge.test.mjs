@@ -73,6 +73,34 @@ describe('MERGE_ZSH_LIB', () => {
     expect(MERGE_ZSH_LIB).toContain('git merge-file --diff3')
     expect(MERGE_ZSH_LIB).not.toContain('git checkout "$src" -- .')
   })
+
+  it('delete/modify вирішує детерміновано (modify-beats-delete), без 3-way і LLM', () => {
+    // Дзеркало «видалено у src, але змінено в ours»: коли ours видалив, а src змінив — лишаємо src.
+    // Гілка бере версію src і робить continue → 3-way (merge-file) і Tier-3-агента не торкається.
+    const branch = 'if [[ ! -f "$rel" ]] && git cat-file -e "$merge_base:$rel" 2> /dev/null; then'
+    expect(MERGE_ZSH_LIB).toContain(branch)
+    const after = MERGE_ZSH_LIB.slice(MERGE_ZSH_LIB.indexOf(branch))
+    expect(after.slice(0, after.indexOf('continue'))).toContain('cp "$theirs_tmp" "$rel"')
+    expect(after.slice(0, after.indexOf('continue'))).toContain('_n7merge_rescued "$rel" "$ours_label" "$src_label"')
+  })
+
+  it('обидва напрямки delete/modify друкують яскравий банер «ВРЯТОВАНО ВІД ВИДАЛЕННЯ»', () => {
+    expect(MERGE_ZSH_LIB).toContain('_n7merge_rescued()')
+    expect(MERGE_ZSH_LIB).toContain('ВРЯТОВАНО ВІД ВИДАЛЕННЯ')
+    expect(MERGE_ZSH_LIB).toContain('modify-beats-delete')
+    // Видалено у src, але змінено в ours → лишаємо ours (deleter=src, kept=ours).
+    expect(MERGE_ZSH_LIB).toContain('_n7merge_rescued "$rel" "$src_label" "$ours_label"')
+    // Видалено в ours, але змінено у src → лишаємо src (deleter=ours, kept=src).
+    expect(MERGE_ZSH_LIB).toContain('_n7merge_rescued "$rel" "$ours_label" "$src_label"')
+  })
+
+  it('опційні людські підписи боків (ours_label/src_label) для виводу, git-операції на ref', () => {
+    expect(MERGE_ZSH_LIB).toContain('local ours_label="${3:-$1}"')
+    expect(MERGE_ZSH_LIB).toContain('local src_label="${4:-$2}"')
+    // Підписи йдуть у merge-file labels і Tier-3 блоки; git show/diff/cat-file лишаються на $ours/$src.
+    expect(MERGE_ZSH_LIB).toContain('-L "поточна ($ours_label)" -L "база" -L "джерело ($src_label)"')
+    expect(MERGE_ZSH_LIB).toContain('git merge-base "$ours" "$src"')
+  })
 })
 
 describe('runZsh', () => {

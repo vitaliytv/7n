@@ -222,29 +222,44 @@ _n7merge_block_theirs() {
     ' "$1"
 }
 
+# Яскраво повідомляє про modify-beats-delete: одна сторона ВИДАЛИЛА файл, інша його ЗМІНИЛА — ми
+# детерміновано лишаємо змінену версію (файл «воскресає»). Спільний банер для обох напрямків, щоб
+# одразу було видно врятований файл. $1 — файл, $2 — хто видалив, $3 — чию (змінену) версію лишаємо.
+_n7merge_rescued() {
+    echo "╭─ 💀→✅ ВРЯТОВАНО ВІД ВИДАЛЕННЯ"
+    echo "│  📄 $1"
+    echo "│  «$2» видалив цей файл, але «$3» його змінив."
+    echo "╰─ лишаю версію «$3» (modify-beats-delete) — переглянь у git diff."
+}
+
 # Ядро: переносить дельту merge-base(ours, src)..src у поточне робоче дерево як unstaged.
 # $1 — ours_ref (поточна сторона: гілка або HEAD), $2 — src_ref (джерело: worktree-гілка або
-# origin/<branch>). Багаторівнево: git apply → git merge-file --diff3 → mergiraf → LLM-агент.
-# Замість пофайлового шуму (git "error: patch failed", per-file mergiraf-рядки) друкує лаконічний
-# підсумок по тірах; деталі (блоки конфлікту + результат + коментар LLM) — лише для Tier 3.
+# origin/<branch>). $3/$4 — опційні ЛЮДСЬКІ підписи боків ЛИШЕ для виводу (дефолт — самі ref); git-
+# операції завжди йдуть на справжні ref $1/$2. Потрібні, коли src — sha-знімок (напр. reverse-delta
+# у pull: src=бекап-коміт), щоб у банерах/блоках писати «локальна робота», а не голий sha.
+# Багаторівнево: git apply → git merge-file --diff3 → mergiraf → LLM-агент. Замість пофайлового шуму
+# (git "error: patch failed", per-file mergiraf-рядки) друкує лаконічний підсумок по тірах; деталі
+# (блоки конфлікту + результат + коментар LLM) — лише для Tier 3.
 # Повертає 0, якщо дельту перенесено без невирішених маркерів; 1 — якщо лишились конфлікти/помилка.
 _n7merge_delta() {
     local ours="$1"
     local src="$2"
+    local ours_label="\${3:-$1}"
+    local src_label="\${4:-$2}"
 
     # Pre-flight знімок незакомічених змін: git stash create робить commit-знімок (staged+unstaged
     # tracked) НЕ чіпаючи робоче дерево й нічого не очищаючи — це чистий бекап на випадок, якщо мердж
     # чи Tier-3-агент щось зіпсує. На чистому дереві create нічого не друкує — тоді крок пропускаємо.
     local backup_sha
-    backup_sha=$(git stash create "n7merge: backup before delta ($ours <- $src)" 2> /dev/null)
+    backup_sha=$(git stash create "n7merge: backup before delta ($ours_label <- $src_label)" 2> /dev/null)
     if [[ -n "$backup_sha" ]]; then
-        git stash store -m "n7merge: backup before delta ($ours <- $src)" "$backup_sha" 2> /dev/null
+        git stash store -m "n7merge: backup before delta ($ours_label <- $src_label)" "$backup_sha" 2> /dev/null
         echo "🛟 Бекап незакомічених змін збережено: git stash apply $backup_sha (відновити) · git stash drop (прибрати)"
     fi
 
     local merge_base=$(git merge-base "$ours" "$src")
     if [[ -z "$merge_base" ]]; then
-        echo "❌ Не вдалося визначити спільного предка (merge-base) $ours і $src."
+        echo "❌ Не вдалося визначити спільного предка (merge-base) $ours_label і $src_label."
         return 1
     fi
 
@@ -290,7 +305,8 @@ _n7merge_delta() {
                 rm -f "$rel"
                 tier1=$((tier1 + 1))
             elif [[ -f "$rel" ]]; then
-                echo "⚠️ $rel видалено у '$src', але змінено локально — лишаю локальну версію."
+                _n7merge_rescued "$rel" "$src_label" "$ours_label"
+                tier1=$((tier1 + 1))
             fi
             continue
         fi
@@ -308,7 +324,7 @@ _n7merge_delta() {
         if [[ "$bn" = "package-lock.json" || "$bn" = "pnpm-lock.yaml" || "$bn" = "yarn.lock" ]]; then
             mkdir -p "$(dirname "$rel")"
             git show "$src:$rel" > "$rel" 2> /dev/null
-            echo "🔒 $rel: взято версію '$src' — перегенеруй відповідним пакетним менеджером."
+            echo "🔒 $rel: взято версію '$src_label' — перегенеруй відповідним пакетним менеджером."
             tier1=$((tier1 + 1))
             continue
         fi
@@ -318,16 +334,32 @@ _n7merge_delta() {
         git show "$src:$rel" > "$theirs_tmp" 2> /dev/null || : > "$theirs_tmp"
         if [[ -f "$rel" ]]; then cp "$rel" "$ours_tmp"; else : > "$ours_tmp"; fi
 
+        # Delete/modify (детерміновано, БЕЗ 3-way і БЕЗ LLM): файл видалено на стороні ours (немає у
+        # робочому дереві), але він існував у базі й змінений у src (інакше не потрапив би у
+        # changed_files) — лишаємо версію src. Це ДЗЕРКАЛО обробки «видалено у src, але змінено в ours»
+        # вище: modify-beats-delete — сторона з модифікацією перемагає видалення. Без цього git
+        # merge-file дав би delete/modify-конфлікт з порожнім ours → маркери → LLM. Типовий кейс:
+        # origin-реліз видалив (консумував) change-файл, а локально його редагували — reverse-delta
+        # детерміновано зберігає локальну (src) версію.
+        if [[ ! -f "$rel" ]] && git cat-file -e "$merge_base:$rel" 2> /dev/null; then
+            mkdir -p "$(dirname "$rel")"
+            cp "$theirs_tmp" "$rel"
+            _n7merge_rescued "$rel" "$ours_label" "$src_label"
+            tier1=$((tier1 + 1))
+            rm -f "$base_tmp" "$ours_tmp" "$theirs_tmp"
+            continue
+        fi
+
         # --diff3 лишає base-секцію (|||||||) — її потребує mergiraf solve для реконструкції.
         # Коди: 0 — чисто, 1..254 — конфлікти (маркери), 255 — помилка (напр. бінарний).
-        git merge-file --diff3 -p -L "поточна ($ours)" -L "база" -L "джерело ($src)" \\
+        git merge-file --diff3 -p -L "поточна ($ours_label)" -L "база" -L "джерело ($src_label)" \\
             "$ours_tmp" "$base_tmp" "$theirs_tmp" > "$ours_tmp.merged" 2> /dev/null
         mf_rc=$?
 
         mkdir -p "$(dirname "$rel")"
         if [[ "$mf_rc" -eq 255 ]]; then
             cp "$theirs_tmp" "$rel"
-            echo "⚠️ $rel: 3-way неможливий (ймовірно бінарний) — взято версію '$src'."
+            echo "⚠️ $rel: 3-way неможливий (ймовірно бінарний) — взято версію '$src_label'."
             tier1=$((tier1 + 1))
         else
             mv "$ours_tmp.merged" "$rel"
@@ -373,9 +405,9 @@ _n7merge_delta() {
         pre="\${t3_pre[$i]}"
         echo ""
         echo "📄 $rel3"
-        echo "   ── Приймач (поточна $ours):"
+        echo "   ── Приймач (поточна $ours_label):"
         _n7merge_block_ours "$pre" | sed 's/^/      /'
-        echo "   ── Джерело ($src):"
+        echo "   ── Джерело ($src_label):"
         _n7merge_block_theirs "$pre" | sed 's/^/      /'
         echo "   ── Результат:"
         [[ -f "$rel3" ]] && diff "$pre" "$rel3" 2> /dev/null | sed -n 's/^> /      /p'

@@ -91,7 +91,7 @@ pull() {
         return 1
     fi
 
-    if ! _n7merge_delta "origin/$branch" "$backup_ref"; then
+    if ! _n7merge_delta "origin/$branch" "$backup_ref" "origin/$branch" "локальна робота"; then
         reverse_done=1
         trap - INT TERM
         echo "❌ Reverse-delta мерж не завершено — розв'яжи конфлікти (git diff), потім закоміть."
