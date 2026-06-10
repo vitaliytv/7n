@@ -7,8 +7,10 @@ import { PULL_ZSH_SCRIPT, pull } from '../pull.js'
 afterEach(() => vi.restoreAllMocks())
 
 describe('PULL_ZSH_SCRIPT', () => {
-  it('вбудовує спільне ядро delta-мерджу як фолбек', () => {
-    expect(PULL_ZSH_SCRIPT).toContain('_n7merge_delta "HEAD" "origin/$branch"')
+  it('reverse-delta вбудовує спільне ядро з ОБЕРНЕНИМИ ролями (ours=origin, src=знімок)', () => {
+    expect(PULL_ZSH_SCRIPT).toContain('_n7merge_delta "origin/$branch" "$backup_ref"')
+    // Старий напрямок (origin-дельта на HEAD) більше не використовується.
+    expect(PULL_ZSH_SCRIPT).not.toContain('_n7merge_delta "HEAD" "origin/$branch"')
   })
 
   it('оновлює remote через git fetch перед мерджем', () => {
@@ -25,14 +27,25 @@ describe('PULL_ZSH_SCRIPT', () => {
     expect(PULL_ZSH_SCRIPT).toContain('git merge --ff-only "origin/$branch"')
   })
 
-  it('FF іде ПЕРЕД дельта-мерджем (фолбек тільки коли FF неможливий)', () => {
+  it('FF іде ПЕРЕД reverse-delta (фолбек тільки коли FF неможливий)', () => {
     expect(PULL_ZSH_SCRIPT.indexOf('git merge --ff-only "origin/$branch"')).toBeLessThan(
-      PULL_ZSH_SCRIPT.indexOf('_n7merge_delta "HEAD" "origin/$branch"')
+      PULL_ZSH_SCRIPT.indexOf('_n7merge_delta "origin/$branch" "$backup_ref"')
     )
   })
 
-  it('повідомляє про перехід на дельта-мердж, коли локальні зміни перетинаються з апдейтом', () => {
-    expect(PULL_ZSH_SCRIPT).toContain('переходжу на дельта-мердж')
+  it('reverse-delta переводить HEAD на origin після знімка локального стану', () => {
+    // Знімок (stash create) має передувати reset --hard, інакше локальні зміни втрачаються.
+    expect(PULL_ZSH_SCRIPT).toContain('git stash create "n7pull: backup before reverse-delta')
+    expect(PULL_ZSH_SCRIPT).toContain('git reset --hard "origin/$branch"')
+    expect(PULL_ZSH_SCRIPT.indexOf('git stash create')).toBeLessThan(
+      PULL_ZSH_SCRIPT.indexOf('git reset --hard "origin/$branch"')
+    )
+  })
+
+  it('reset --hard страхується trap-відкатом до локального стану на перерив', () => {
+    expect(PULL_ZSH_SCRIPT).toContain('trap ')
+    expect(PULL_ZSH_SCRIPT).toContain('git reset --hard "$old_head"')
+    expect(PULL_ZSH_SCRIPT).toContain('INT TERM')
   })
 })
 
