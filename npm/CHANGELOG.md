@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-06-10
+
+### Fixed
+
+- Tier-3 резолвер перейменовано omlx.js/omlx-resolve.js → .mjs: Node визначає ESM за розширенням і НЕ читає package.json при старті. Інакше резолв конфліктного package.json (з diff3-маркерами) падав з ERR_INVALID_PACKAGE_CONFIG ще до роботи omlx
+
 ## [0.8.0] - 2026-06-10
 
 ### Changed
