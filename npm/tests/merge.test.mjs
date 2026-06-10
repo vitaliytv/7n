@@ -35,10 +35,15 @@ describe('MERGE_ZSH_LIB', () => {
     expect(MERGE_ZSH_LIB).toContain('_n7merge_resolve_with_agent "$conflict_files" "$ours" "$src" "$agent_summary"')
   })
 
-  it('env-кнопки нейтральні (N7MERGE_*) із backward-фолбеком на GETW_*', () => {
-    expect(MERGE_ZSH_LIB).toContain('${N7MERGE_PI_MODEL:-}')
-    expect(MERGE_ZSH_LIB).toContain('${N7MERGE_MODEL:-${GETW_MERGE_MODEL:-sonnet}}')
-    expect(MERGE_ZSH_LIB).toContain('${N7MERGE_CURSOR_MODEL:-${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}')
+  it('Tier 3 делегує резолв ЛОКАЛЬНОМУ omlx (node $N7MERGE_RESOLVER), без cloud-агентів у мерджі', () => {
+    expect(MERGE_ZSH_LIB).toContain('node "$N7MERGE_RESOLVER" "${(@f)files}"')
+    // У мердж-резолві жодних pi/claude/cursor (вони лишились лише в push для commit-меседжу).
+    expect(MERGE_ZSH_LIB).not.toContain('command -v pi')
+    expect(MERGE_ZSH_LIB).not.toContain('cursor-agent -p')
+    expect(MERGE_ZSH_LIB).not.toContain('claude -p')
+  })
+
+  it('mergiraf-кнопка лишається (N7MERGE_NO_MERGIRAF із фолбеком GETW_)', () => {
     expect(MERGE_ZSH_LIB).toContain('${N7MERGE_NO_MERGIRAF:-${GETW_NO_MERGIRAF:-0}}')
   })
 
@@ -48,22 +53,16 @@ describe('MERGE_ZSH_LIB', () => {
     expect(MERGE_ZSH_LIB).toContain('git stash apply')
   })
 
-  it('промпт Tier-3-агента просить per-file підсумок у stdout', () => {
-    expect(MERGE_ZSH_LIB).toContain('надрукуй')
-    expect(MERGE_ZSH_LIB).toMatch(/підсумок по КОЖНОМУ файлу/)
+  it('Tier-3 резолвер: перевіряє node + N7MERGE_RESOLVER, підсумок у summary_out (розділ Tier 3)', () => {
+    expect(MERGE_ZSH_LIB).toContain('command -v node')
+    expect(MERGE_ZSH_LIB).toContain('omlx-резолвер не знайдено (N7MERGE_RESOLVER=')
+    // Підсумок резолвера віддаємо у summary_out (4-й арг), а не одразу в stdout.
+    expect(MERGE_ZSH_LIB).toContain('cp "$out" "$summary_out"')
   })
 
-  it('пробує агентів у порядку pi → claude → cursor-agent', () => {
-    expect(MERGE_ZSH_LIB.indexOf('command -v pi')).toBeLessThan(MERGE_ZSH_LIB.indexOf('command -v claude'))
-    expect(MERGE_ZSH_LIB.indexOf('command -v claude')).toBeLessThan(MERGE_ZSH_LIB.indexOf('command -v cursor-agent'))
-    expect(MERGE_ZSH_LIB).toContain('--tools read,edit,write')
-  })
-
-  it('показує exit code агента і йде до наступного fallback', () => {
-    expect(MERGE_ZSH_LIB).toContain('_n7agent_report_failure "pi -p" "$rc" "$agent_out" "$agent_err"')
-    expect(MERGE_ZSH_LIB).toContain('_n7agent_report_failure "claude -p" "$rc" "$agent_out" "$agent_err"')
+  it('_n7agent_report_failure лишається визначеним (його використовує push для commit-меседжу)', () => {
+    expect(MERGE_ZSH_LIB).toContain('_n7agent_report_failure()')
     expect(MERGE_ZSH_LIB).toContain('❌ $agent не вдався (exit code: $rc).')
-    expect(MERGE_ZSH_LIB).toContain('Усі доступні LLM-агенти не спрацювали')
   })
 
   it('переносить дельту merge-base..src через apply→merge-file (не git checkout зрізу)', () => {
@@ -112,7 +111,22 @@ describe('runZsh', () => {
     })
     const code = await runZsh('echo hi', spawnFn, ['feature'])
     expect(code).toBe(7)
-    expect(spawnFn).toHaveBeenCalledWith('zsh', ['-c', 'echo hi', 'npx @7n/n', 'feature'], { stdio: 'inherit' })
+    expect(spawnFn).toHaveBeenCalledWith(
+      'zsh',
+      ['-c', 'echo hi', 'npx @7n/n', 'feature'],
+      expect.objectContaining({ stdio: 'inherit' })
+    )
+  })
+
+  it('передає шлях до omlx-резолвера через N7MERGE_RESOLVER', async () => {
+    const emitter = new EventEmitter()
+    const spawnFn = vi.fn(() => {
+      setImmediate(() => emitter.emit('exit', 0))
+      return emitter
+    })
+    await runZsh('echo hi', spawnFn, [])
+    const opts = spawnFn.mock.calls[0][2]
+    expect(opts.env.N7MERGE_RESOLVER).toMatch(/omlx-resolve\.js$/)
   })
 
   it('exit без коду → 0', async () => {

@@ -27,6 +27,8 @@
     "getw.js",
     "index.js",
     "merge.js",
+    "omlx.js",
+    "omlx-resolve.js",
     "pull.js",
     "push.js",
     "README.md",

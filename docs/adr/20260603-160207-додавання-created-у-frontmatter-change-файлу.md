@@ -27,3 +27,12 @@ Chosen option: "Додати поле `created` у frontmatter через окр
 - Нова публічна функція `formatCreated` додана до іменованих експортів `ch.js` та імпортована в тестах.
 - Виклик змінено з `serializeChange(entry)` на `serializeChange(entry, now)`.
 - Тести: `bun run vitest run tests/ch.test.mjs` — 14 passed (1 file).
+
+## Update 2026-06-04
+
+Реалізацію підтверджено в `npm/ch.js` та `npm/tests/ch.test.mjs`:
+
+- Нова публічна функція `formatCreated(now: Date): string` — повертає рядок `DD.MM HH:MM` із нулями.
+- Оновлена сигнатура: `serializeChange(entry, now)` — приймає `now` для вставки поля `created` між `section` і закриваючим `---`.
+- Тести: 14 passed — `bun run vitest run tests/ch.test.mjs`.
+- Сумісність із `@nitra/cursor`: парсер `node_modules/@nitra/cursor/rules/release/lib/change-file.mjs` описаний як мінімальний (лише `bump` і `section`); зайві ключі, найімовірніше, ігноруються, але явного підтвердження в transcript не зафіксовано.

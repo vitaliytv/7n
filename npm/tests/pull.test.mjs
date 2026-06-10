@@ -58,7 +58,11 @@ describe('pull', () => {
     })
     const code = await pull('feature-x', spawnFn)
     expect(code).toBe(0)
-    expect(spawnFn).toHaveBeenCalledWith('zsh', ['-c', PULL_ZSH_SCRIPT, 'npx @7n/n', 'feature-x'], { stdio: 'inherit' })
+    expect(spawnFn).toHaveBeenCalledWith(
+      'zsh',
+      ['-c', PULL_ZSH_SCRIPT, 'npx @7n/n', 'feature-x'],
+      expect.objectContaining({ stdio: 'inherit' })
+    )
   })
 
   it('без гілки передає порожній рядок (zsh визначить поточну)', async () => {

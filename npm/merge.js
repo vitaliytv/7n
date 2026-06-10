@@ -1,5 +1,9 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { fileURLToPath } from 'node:url'
+
+// Шлях до Tier-3 omlx-резолвера; передаємо в zsh як N7MERGE_RESOLVER (Tier 3 шелл-аутить `node $…`).
+const RESOLVER_PATH = fileURLToPath(new URL('omlx-resolve.js', import.meta.url))
 
 // Спільне ядро delta-мерджу для getw і pull. Обидві команди переносять у поточне робоче дерево
 // як unstaged ЛИШЕ дельту merge-base(ours, src)..src (а не весь зріз src через `git checkout`), щоб
@@ -42,97 +46,42 @@ _n7agent_report_failure() {
     fi
 }
 
-# Викликає LLM-агента, щоб ПРИБРАТИ конфліктні маркери у вже наявних файлах. Агент нічого не
-# видаляє і не запускає git — лише редагує перелічені файли й друкує per-file підсумок (що хотіла
-# кожна сторона і як примирено) у stdout; вердикт (чи лишились маркери) виносить скрипт окремо.
-# $1 — newline-список файлів, $2 — ours-ref (мітка), $3 — src-ref (мітка).
+# Tier 3: інтелектуальний резолв конфліктних маркерів через ЛОКАЛЬНИЙ omlx (gemma-4 на MLX), без
+# cloud-агентів. Делегуємо нашому JS-резолверу ($N7MERGE_RESOLVER = omlx-resolve.js): generate-validate
+# цикл ПО-ХУНКОВО з агресивною валідацією (маркери/галюцинації/покриття обох сторін/довжина) і
+# таргетованим ретраєм. JS читає ours/base/theirs прямо з diff3-маркерів у файлах, редагує файли
+# in-place і друкує per-file підсумок у stdout (його віддаємо у summary_out для розділу Tier 3).
+# Нерозвʼязані хунки лишаються з маркерами — вердикт (чи лишились) виносить ядро окремо.
+# $1 — newline-список файлів, $4 — summary_out ($2/$3 ours/src більше не потрібні: контекст у маркерах).
 _n7merge_resolve_with_agent() {
     local files="$1"
-    local ours="$2"
-    local src="$3"
     local summary_out="$4"
-    local prompt="Під час 3-way merge '$src' у '$ours' у цих файлах лишилися конфліктні маркери (<<<<<<<, =======, >>>>>>>):
-$files
 
-Для КОЖНОГО файлу розв'яжи всі конфлікти, поєднавши наміри обох сторін так, щоб результат був коректним і робочим, і прибери ВСІ конфліктні маркери (рядки <<<<<<<, =======, >>>>>>> разом з мітками гілок). Редагуй ЛИШЕ перелічені файли. НЕ створюй і НЕ видаляй файлів, НЕ запускай git-команд. Якщо файл — lock (напр. bun.lock) і надійно змержити неможливо, лиши версію '$src' без маркерів (його за потреби перегенерують окремо).
-
-Наприкінці надрукуй (у відповіді, НЕ у файли) короткий підсумок по КОЖНОМУ файлу: 1-2 рядки — що хотіла кожна сторона у конфлікті і як саме ти це примирив."
-
-    local agent_out agent_err rc
-    local tried_agent=0 last_rc=1
-
-    if command -v pi > /dev/null 2>&1; then
-        tried_agent=1
-        agent_out=$(mktemp)
-        agent_err=$(mktemp)
-        local -a pi_args
-        pi_args=(-p --no-session --no-context-files --tools read,edit,write)
-        if [[ -n "\${N7MERGE_PI_MODEL:-}" ]]; then
-            pi_args+=(--model "\${N7MERGE_PI_MODEL:-}")
-        fi
-        echo "🤖 Інтелектуальний мерж через pi -p..."
-        pi "\${pi_args[@]}" "$prompt" > "$agent_out" 2> "$agent_err"
-        rc=$?
-        if [[ "$rc" -eq 0 ]]; then
-            # Підсумок агента не друкуємо одразу — віддаємо його ядру (через summary_out), щоб
-            # показати у розділі Tier 3 разом із блоками конфлікту. Без summary_out — старий cat.
-            if [[ -n "$summary_out" ]]; then cp "$agent_out" "$summary_out"; else cat "$agent_out"; fi
-            [[ -s "$agent_err" ]] && cat "$agent_err" >&2
-            rm -f "$agent_out" "$agent_err"
-            return 0
-        fi
-        _n7agent_report_failure "pi -p" "$rc" "$agent_out" "$agent_err"
-        rm -f "$agent_out" "$agent_err"
-        last_rc="$rc"
+    if ! command -v node > /dev/null 2>&1; then
+        echo "❌ Немає node у PATH — omlx-резолвер недоступний." >&2
+        return 1
+    fi
+    if [[ -z "$N7MERGE_RESOLVER" || ! -f "$N7MERGE_RESOLVER" ]]; then
+        echo "❌ omlx-резолвер не знайдено (N7MERGE_RESOLVER=$N7MERGE_RESOLVER)." >&2
+        return 1
     fi
 
-    if command -v claude > /dev/null 2>&1; then
-        tried_agent=1
-        agent_out=$(mktemp)
-        agent_err=$(mktemp)
-        echo "🤖 Інтелектуальний мерж через claude -p..."
-        claude -p "$prompt" --permission-mode acceptEdits --allowedTools "Edit,Write,MultiEdit,Read" --model "\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}" > "$agent_out" 2> "$agent_err"
-        rc=$?
-        if [[ "$rc" -eq 0 ]]; then
-            # Підсумок агента не друкуємо одразу — віддаємо його ядру (через summary_out), щоб
-            # показати у розділі Tier 3 разом із блоками конфлікту. Без summary_out — старий cat.
-            if [[ -n "$summary_out" ]]; then cp "$agent_out" "$summary_out"; else cat "$agent_out"; fi
-            [[ -s "$agent_err" ]] && cat "$agent_err" >&2
-            rm -f "$agent_out" "$agent_err"
-            return 0
-        fi
-        _n7agent_report_failure "claude -p" "$rc" "$agent_out" "$agent_err"
-        rm -f "$agent_out" "$agent_err"
-        last_rc="$rc"
+    echo "🤖 Інтелектуальний резолв через локальний omlx..."
+    local out rc
+    out=$(mktemp)
+    # \${(@f)files} — кожен рядок списку окремим argv (зберігає пробіли в іменах, без word-splitting).
+    node "$N7MERGE_RESOLVER" "\${(@f)files}" > "$out" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        # Підсумок резолвера віддаємо ядру (через summary_out), щоб показати у розділі Tier 3.
+        if [[ -n "$summary_out" ]]; then cp "$out" "$summary_out"; else cat "$out"; fi
+        rm -f "$out"
+        return 0
     fi
-
-    if command -v cursor-agent > /dev/null 2>&1; then
-        tried_agent=1
-        agent_out=$(mktemp)
-        agent_err=$(mktemp)
-        echo "🤖 Інтелектуальний мерж через cursor-agent -p..."
-        cursor-agent -p --force --output-format text --model "\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}" "$prompt" > "$agent_out" 2> "$agent_err"
-        rc=$?
-        if [[ "$rc" -eq 0 ]]; then
-            # Підсумок агента не друкуємо одразу — віддаємо його ядру (через summary_out), щоб
-            # показати у розділі Tier 3 разом із блоками конфлікту. Без summary_out — старий cat.
-            if [[ -n "$summary_out" ]]; then cp "$agent_out" "$summary_out"; else cat "$agent_out"; fi
-            [[ -s "$agent_err" ]] && cat "$agent_err" >&2
-            rm -f "$agent_out" "$agent_err"
-            return 0
-        fi
-        _n7agent_report_failure "cursor-agent -p" "$rc" "$agent_out" "$agent_err"
-        rm -f "$agent_out" "$agent_err"
-        last_rc="$rc"
-    fi
-
-    if [[ "$tried_agent" -eq 1 ]]; then
-        echo "❌ Усі доступні LLM-агенти не спрацювали або fallback-и недоступні." >&2
-        return "$last_rc"
-    fi
-
-    echo "❌ Немає pi, claude або cursor-agent у PATH — інтелектуальний мерж неможливий."
-    return 1
+    # omlx недоступний або лишилися нерозвʼязані хунки — показуємо причину, маркери лишаються в файлах.
+    cat "$out" >&2
+    rm -f "$out"
+    return "$rc"
 }
 
 # З newline-списку файлів ($1) друкує ті, що ще містять конфліктні маркери. Це детермінований
@@ -456,7 +405,10 @@ _n7merge_delta() {
  * @returns {Promise<number>} exit code дочірнього zsh-процесу
  */
 export async function runZsh(script, spawnFn = spawn, argv = []) {
-  const shell = spawnFn('zsh', ['-c', script, 'npx @7n/n', ...argv], { stdio: 'inherit' })
+  const shell = spawnFn('zsh', ['-c', script, 'npx @7n/n', ...argv], {
+    stdio: 'inherit',
+    env: { ...process.env, N7MERGE_RESOLVER: process.env.N7MERGE_RESOLVER || RESOLVER_PATH },
+  })
   try {
     // once(emitter, 'exit') резолвиться аргументами події [code, signal] і відхиляється, якщо
     // емітнеться 'error' (напр. zsh не знайдено) — обидва кейси покрито без new Promise.
