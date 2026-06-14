@@ -208,3 +208,34 @@ describe('resolveFileText', () => {
     expect(badRes.text).toContain('<<<<<<< OURS')
   })
 })
+
+describe('V8 — JSON-валідність (opts.isJson)', () => {
+  const cfg = { url: 'u', key: 'k', model: 'm', maxTokens: 100, retries: 2, strict: true }
+  // Конфлікт на полі "v"; після нього є "x": 1 — тож пропущена кома робить файл невалідним JSON.
+  const json = ['{', '<<<<<<< OURS', '  "v": "1",', '||||||| BASE', '  "v": "0",', '=======', '  "v": "2",', '>>>>>>> THEIRS', '  "x": 1', '}'].join('\n')
+
+  it('валідний JSON-резолв приймається', async () => {
+    const res = await resolveFileText(json, cfg, fakeFetch([wrap('  "v": "2",')]), { isJson: true })
+    expect(res.failed).toBe(0)
+    expect(() => JSON.parse(res.text)).not.toThrow()
+  })
+
+  it('дроп коми (per-hunk валідний, але невалідний JSON) → ретрай виправляє', async () => {
+    // 1-й прохід без коми (хунк проходить, файл — ні) → 2-й прохід із комою.
+    const res = await resolveFileText(json, cfg, fakeFetch([wrap('  "v": "2"'), wrap('  "v": "2",')]), { isJson: true })
+    expect(res.failed).toBe(0)
+    expect(() => JSON.parse(res.text)).not.toThrow()
+  })
+
+  it('завжди невалідний JSON → після ретраїв лишаються маркери', async () => {
+    const res = await resolveFileText(json, cfg, fakeFetch([wrap('  "v": "2"')]), { isJson: true })
+    expect(res.failed).toBe(1)
+    expect(res.text).toContain('<<<<<<< OURS')
+    expect(res.details[0].reasons).toMatch(/валідним JSON/)
+  })
+
+  it('той самий контент БЕЗ isJson — V8 не застосовується (хунк проходить)', async () => {
+    const res = await resolveFileText(json, cfg, fakeFetch([wrap('  "v": "2"')]), { isJson: false })
+    expect(res.failed).toBe(0)
+  })
+})

@@ -329,9 +329,10 @@ export function validateResolution({ ours, base, theirs }, resolved, { strict = 
  * OURS/BASE/THEIRS і (за наявності) таргетованим фідбеком попередньої відхиленої спроби.
  * @param {{ours:string[],base:string[],theirs:string[]}} hunk
  * @param {string} feedback
+ * @param {string} [extraRule] - додаткове правило в system (напр. вимога валідного JSON)
  * @returns {Array<{role:string,content:string}>}
  */
-function buildMessages(hunk, feedback) {
+function buildMessages(hunk, feedback, extraRule = '') {
   const sys = [
     'Ти розвʼязуєш ОДИН git-конфлікт. Дано три версії: OURS, BASE, THEIRS.',
     'Поверни ОДИН злитий результат, що зберігає наміри ОБОХ сторін (OURS і THEIRS).',
@@ -339,6 +340,7 @@ function buildMessages(hunk, feedback) {
     '- Збережи КОЖЕН рядок, доданий в OURS (відносно BASE), І КОЖЕН доданий в THEIRS. Не викидай рядок лише тому, що він на одній стороні.',
     '- Якщо сторони правлять той самий рядок по-різному — поєднай розумно.',
     '- НЕ вигадуй рядків, яких немає в жодній версії.',
+    extraRule,
     `- Виведи РІВНО злиті рядки між маркерами ${RESOLVE_START} та ${RESOLVE_END}. Без пояснень, без code fence.`,
     '',
     'Приклад:',
@@ -378,14 +380,15 @@ function buildMessages(hunk, feedback) {
  * @param {{ours:string[],base:string[],theirs:string[]}} hunk
  * @param {object} cfg
  * @param {typeof fetch} [fetchFn]
+ * @param {string} [extraRule] - додаткове правило system (напр. вимога валідного JSON)
  * @returns {Promise<{ok:boolean,resolved?:string[],attempts?:number,reasons?:string}>}
  */
-export async function resolveHunk(hunk, cfg, fetchFn = fetch) {
+export async function resolveHunk(hunk, cfg, fetchFn = fetch, extraRule = '') {
   const temps = [0, 0.3, 0.6]
   let feedback = ''
   for (let attempt = 0; attempt <= cfg.retries; attempt++) {
     const temperature = temps[Math.min(attempt, temps.length - 1)]
-    const out = await omlxChat(buildMessages(hunk, feedback), cfg, { temperature }, fetchFn)
+    const out = await omlxChat(buildMessages(hunk, feedback, extraRule), cfg, { temperature }, fetchFn)
     const resolved = extractResolved(out)
     const { ok, reasons } = validateResolution(hunk, resolved, { strict: cfg.strict })
     if (ok) {
@@ -396,15 +399,24 @@ export async function resolveHunk(hunk, cfg, fetchFn = fetch) {
   return { ok: false, reasons: feedback }
 }
 
+const isValidJson = text => {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
- * Резолвить усі хунки тексту файлу. Нерозвʼязані хунки лишаються з маркерами (на ручний резолв).
- * @param {string} text
+ * Один прохід: резолвить кожен conflict-сегмент (in-place у seg.resolved), повертає лічильники й деталі.
+ * @param {Array<object>} segments
  * @param {object} cfg
- * @param {typeof fetch} [fetchFn]
- * @returns {Promise<{text:string,resolved:number,failed:number,details:object[]}>}
+ * @param {typeof fetch} fetchFn
+ * @param {string} extraRule
+ * @returns {Promise<{resolved:number,failed:number,details:object[]}>}
  */
-export async function resolveFileText(text, cfg, fetchFn = fetch) {
-  const segments = parseConflicts(text)
+async function resolvePass(segments, cfg, fetchFn, extraRule) {
   let resolved = 0
   let failed = 0
   const details = []
@@ -412,7 +424,7 @@ export async function resolveFileText(text, cfg, fetchFn = fetch) {
     if (seg.type !== 'conflict') {
       continue
     }
-    const r = await resolveHunk(seg, cfg, fetchFn)
+    const r = await resolveHunk(seg, cfg, fetchFn, extraRule)
     if (r.ok) {
       seg.resolved = r.resolved
       resolved++
@@ -423,7 +435,51 @@ export async function resolveFileText(text, cfg, fetchFn = fetch) {
       details.push({ ok: false, reasons: r.reasons })
     }
   }
-  return { text: reconstruct(segments), resolved, failed, details }
+  return { resolved, failed, details }
+}
+
+/**
+ * Резолвить усі хунки тексту файлу. Нерозвʼязані хунки лишаються з маркерами (на ручний резолв).
+ * V8: для JSON-файлів (opts.isJson) увесь файл після резолву має парситись через JSON.parse — інакше
+ * (типово: модель загубила кому) пере-резолвимо з підсилювальним правилом; після ретраїв — маркери.
+ * @param {string} text
+ * @param {object} cfg
+ * @param {typeof fetch} [fetchFn]
+ * @param {{isJson?:boolean}} [opts]
+ * @returns {Promise<{text:string,resolved:number,failed:number,details:object[]}>}
+ */
+export async function resolveFileText(text, cfg, fetchFn = fetch, opts = {}) {
+  const segments = parseConflicts(text)
+  if (!segments.some(s => s.type === 'conflict')) {
+    return { text, resolved: 0, failed: 0, details: [] }
+  }
+  const jsonRule = opts.isJson
+    ? '- Цей фрагмент — частина JSON-файлу: результат МУСИТЬ лишатися валідним JSON (зокрема коми між полями).'
+    : ''
+  const maxPasses = opts.isJson ? cfg.retries : 0
+
+  let pass = await resolvePass(segments, cfg, fetchFn, jsonRule)
+  let out = reconstruct(segments)
+  for (let p = 1; p <= maxPasses && opts.isJson && pass.failed === 0 && !isValidJson(out); p++) {
+    pass = await resolvePass(segments, cfg, fetchFn, `${jsonRule} Попередній результат давав НЕВАЛІДНИЙ JSON — виправ синтаксис (ймовірно бракує коми).`)
+    out = reconstruct(segments)
+  }
+  // V8-вердикт: JSON досі невалідний (попри ok-хунки) → лишаємо маркери на ручний резолв.
+  if (opts.isJson && pass.failed === 0 && !isValidJson(out)) {
+    for (const seg of segments) {
+      if (seg.type === 'conflict') {
+        seg.resolved = rebuildMarkers(seg)
+      }
+    }
+    const conflicts = segments.filter(s => s.type === 'conflict').length
+    return {
+      text: reconstruct(segments),
+      resolved: 0,
+      failed: conflicts,
+      details: [{ ok: false, reasons: 'результат не є валідним JSON після ретраїв' }],
+    }
+  }
+  return { text: out, resolved: pass.resolved, failed: pass.failed, details: pass.details }
 }
 
 /**
@@ -441,7 +497,7 @@ export async function resolveFiles(files, cfg, deps = {}) {
   const summary = []
   let anyFailed = false
   for (const file of files) {
-    const res = await resolveFileText(read(file, 'utf8'), resolved, fetchFn)
+    const res = await resolveFileText(read(file, 'utf8'), resolved, fetchFn, { isJson: /\.json$/i.test(file) })
     write(file, res.text)
     if (res.failed) {
       anyFailed = true

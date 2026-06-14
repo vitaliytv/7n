@@ -1,10 +1,7 @@
----
-session: 55f28a5f-f103-4498-b4de-70910a6d8488
-captured: 2026-06-05T10:34:53+03:00
-transcript: /Users/vitalii/.claude/projects/-Users-vitalii-www-vitaliytv-7n/55f28a5f-f103-4498-b4de-70910a6d8488.jsonl
----
+# Явна точка порівняння `$base` у `git diff --cached` у `push.js`
 
-## ADR Явна точка порівняння `$base` у `git diff --cached` у `push.js`
+**Status:** Accepted
+**Date:** 2026-06-05
 
 ## Context and Problem Statement
 
@@ -13,11 +10,11 @@ transcript: /Users/vitalii/.claude/projects/-Users-vitalii-www-vitaliytv-7n/55f2
 ## Considered Options
 
 * Залишити `git diff --cached` без аргументу (покладаючись на неявний HEAD==base після `reset --soft`)
-* Передавати `"$base"` явно в кожен виклик `git diff --cached` у секції формування контексту
+* Передавати `$base` явно в кожен виклик `git diff --cached` у секції формування контексту
 
 ## Decision Outcome
 
-Chosen option: "Передавати `"$base"` явно", because під час сесії підтверджено, що поведінка вже є коректною (experiment із трьома джерелами: origin-committed, local-committed, unstaged — усі потрапляли в аналіз), а explicit-форма лише самодокументує інваріанту й захищає від майбутнього рефактора.
+Chosen option: "Передавати `$base` явно", because під час сесії підтверджено, що поведінка вже є коректною (experiment із трьома джерелами: origin-committed, local-committed, unstaged — усі потрапляли в аналіз), а explicit-форма лише самодокументує інваріанту й захищає від майбутнього рефактора.
 
 ### Consequences
 
@@ -26,13 +23,10 @@ Chosen option: "Передавати `"$base"` явно", because під час 
 
 ## More Information
 
-Змінені файли: `npm/push.js`, `npm/tests/push.test.mjs`.
-
-Конкретні зміни в `npm/push.js`:
-- `git diff --cached --name-only` → `git diff --cached --name-only "$base" --`
-- `git diff --cached --name-status` → `git diff --cached --name-status "$base" --`
-- `git diff --cached -- . "${noise[@]}"` → `git diff --cached "$base" -- . "${noise[@]}"`
-
-Changelog-запис: `npm/.changes/260605-1033.md` (bump: patch, section: Changed).
-
-Перевірку проходять усі 18 тестів: `bun test tests/push.test.mjs` — 18 pass, 0 fail.
+* Змінені файли: `npm/push.js`, `npm/tests/push.test.mjs`.
+* Конкретні зміни в `npm/push.js`:
+  - `git diff --cached --name-only` → `git diff --cached --name-only "$base" --`
+  - `git diff --cached --name-status` → `git diff --cached --name-status "$base" --`
+  - `git diff --cached -- . "${noise[@]}"` → `git diff --cached "$base" -- . "${noise[@]}"`
+* Changelog-запис: `npm/.changes/260605-1033.md` (bump: patch, section: Changed).
+* Тести: `bun test tests/push.test.mjs` — 18/18 passed.

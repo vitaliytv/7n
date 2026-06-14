@@ -25,3 +25,10 @@ Chosen option: "`push`", because користувач явно обрав цю �
 
 ## More Information
 Реалізація: `npm/push.js`, `npm/index.js`, `npm/types/index.d.ts`, `npm/tests/push.test.mjs`, `npm/README.md`, `npm/.changes/1780506647000-211678.md`. Change-bump: `minor`, section: `Added`. Тести: 46/46 pass. `zsh -n` синтаксис валідний.
+
+## Update 2026-06-05
+
+Уточнено повний обсяг сквошингу: `push` охоплює як усі локальні коміти (`origin/<branch>..HEAD`), так і всі зміни робочого дерева (staged/unstaged/untracked) через `git add -A` перед сквошингом — все зводиться в один коміт на вершині.
+
+- Реалізація: `npm/push.js` (функція `push`, імпортує `MERGE_ZSH_LIB`, `runZsh` з `npm/merge.js`)
+- Тести: `npm/tests/push.test.mjs` перевіряє наявність `git reset --soft "$base"` та `git add -A` у згенерованому zsh-скрипті
