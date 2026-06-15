@@ -41,3 +41,7 @@ Chosen option: "Виконання `n-fix` у ізольованому git-workt
 ## Update 2026-06-05
 
 Підтверджено preflight-flow скіла `n-fix`: preflight-команда `git rev-parse --show-toplevel && git branch --show-current`. Якщо не під `.worktrees/` — автоматичне створення: `npx @nitra/cursor worktree add "main-fix" "n-fix: worktree-only skill"` → `.worktrees/main-fix`. Bootstrap: `bun install`. Перевірка правил: `npx @nitra/cursor fix` — результат `✨ Результат: 1/1 правил без зауважень`, `❌` відсутні. Конфігурація: `.cursor/skills/n-fix/SKILL.md`, `meta.json` → `worktree: true`.
+
+## Update 2026-06-09
+
+Підтверджено на практиці: агент запустив `n-fix` у `/Users/vitalii/www/vitaliytv/7n` (гілка `main`) поза `.worktrees/`. Preflight `git rev-parse --show-toplevel` показав відхилення — агент автоматично виконав `npx @nitra/cursor worktree add "main-fix" "n-fix: worktree-only skill"` без запиту до користувача. Після `bun install` (623 пакети) та виконання `n_cursor_npx` результат: `✅ fix: 15 правил — все чисто`, основна гілка залишилась `nothing to commit, working tree clean`. Конвенція іменування підтверджена: `<current-branch>-fix` → `main-fix`.
