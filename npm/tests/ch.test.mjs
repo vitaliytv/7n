@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  affectedWorkspaces,
   buildChangeArgs,
   buildGenMessages,
   cleanGeneratedMessage,
-  groupByWorkspace,
   parseChArgs,
   parsePorcelainZ,
+  planChanges,
   runCh
 } from '../ch.js'
 import { run } from '../index.js'
@@ -112,26 +111,37 @@ describe('parsePorcelainZ', () => {
   })
 })
 
-describe('groupByWorkspace / affectedWorkspaces', () => {
-  it('групує файли за найдовшим префіксом, решта → корінь', () => {
-    expect(groupByWorkspace(['npm/ch.js', 'docs/x.md', 'package.json'], ['npm'])).toEqual([
-      { ws: '.', files: ['docs/x.md', 'package.json'] },
-      { ws: 'npm', files: ['npm/ch.js'] }
-    ])
+describe('planChanges', () => {
+  it('монорепо: файли під воркспейсом → group; кореневі/docs → orphans', () => {
+    expect(planChanges(['npm/ch.js', 'docs/x.md', 'package.json'], ['npm'])).toEqual({
+      groups: [{ ws: 'npm', files: ['npm/ch.js'] }],
+      orphans: ['docs/x.md', 'package.json']
+    })
   })
 
   it('вкладені воркспейси → найдовший виграє', () => {
-    expect(groupByWorkspace(['packages/a/x.js'], ['packages/a', 'packages'])).toEqual([
-      { ws: 'packages/a', files: ['packages/a/x.js'] }
-    ])
+    expect(planChanges(['packages/a/x.js'], ['packages/a', 'packages'])).toEqual({
+      groups: [{ ws: 'packages/a', files: ['packages/a/x.js'] }],
+      orphans: []
+    })
   })
 
-  it('affectedWorkspaces — лише назви', () => {
-    expect(affectedWorkspaces(['npm/a.js', 'docs/x.md'], ['npm'])).toEqual(['.', 'npm'])
+  it('однопакетне репо (без workspaces) → усе в корінь `.`', () => {
+    expect(planChanges(['src/a.js', 'docs/x.md'], [])).toEqual({
+      groups: [{ ws: '.', files: ['src/a.js', 'docs/x.md'] }],
+      orphans: []
+    })
   })
 
-  it('без змін → []', () => {
-    expect(groupByWorkspace([], ['npm'])).toEqual([])
+  it('лише кореневі зміни в монорепо → groups порожні, усе в orphans', () => {
+    expect(planChanges(['docs/adr/x.md', '.changes/y.md'], ['npm'])).toEqual({
+      groups: [],
+      orphans: ['docs/adr/x.md', '.changes/y.md']
+    })
+  })
+
+  it('без змін → порожньо', () => {
+    expect(planChanges([], ['npm'])).toEqual({ groups: [], orphans: [] })
   })
 })
 
@@ -180,22 +190,47 @@ describe('runCh — з --message', () => {
     const code = await runCh(['--message', 'опис'], {
       log: collector().log,
       run: spy.run,
-      context: ctx(['npm/ch.js', 'docs/x.md'], ['npm'])
+      context: ctx(['npm/ch.js', 'pkg/b/x.js'], ['npm', 'pkg/b'])
     })
     expect(code).toBe(0)
     expect(spy.calls.length).toBe(2)
-    expect(spy.calls[0].args).not.toContain('--ws')
-    expect(spy.calls[1].args.at(-1)).toBe('npm')
+    expect(spy.calls[0].args.at(-1)).toBe('npm')
+    expect(spy.calls[1].args.at(-1)).toBe('pkg/b')
   })
 
-  it('без змін → fallback у корінь, нотатка', async () => {
+  it('без змін → exit 0, канон не викликається', async () => {
     const io = collector()
     const spy = runnerSpy(0)
     const code = await runCh(['--message', 'опис'], { log: io.log, run: spy.run, context: ctx([], ['npm']) })
     expect(code).toBe(0)
+    expect(spy.calls).toEqual([])
+    expect(io.lines.join('\n')).toContain('Немає змін у воркспейсах')
+  })
+
+  it('лише кореневі/docs зміни в монорепо → пропуск (orphans), канон не викликається', async () => {
+    const io = collector()
+    const spy = runnerSpy(0)
+    const code = await runCh(['--message', 'опис'], {
+      log: io.log,
+      run: spy.run,
+      context: ctx(['docs/adr/x.md', '.changes/y.md'], ['npm'])
+    })
+    expect(code).toBe(0)
+    expect(spy.calls).toEqual([])
+    expect(io.lines.join('\n')).toContain('Поза воркспейсами')
+    expect(io.lines.join('\n')).toContain('Немає змін у воркспейсах')
+  })
+
+  it('однопакетне репо (без workspaces) → пише в корінь `.` без --ws', async () => {
+    const spy = runnerSpy(0)
+    const code = await runCh(['--message', 'опис'], {
+      log: collector().log,
+      run: spy.run,
+      context: ctx(['src/a.js'], [])
+    })
+    expect(code).toBe(0)
     expect(spy.calls.length).toBe(1)
     expect(spy.calls[0].args).not.toContain('--ws')
-    expect(io.lines.join('\n')).toContain('Змінених файлів не знайдено')
   })
 })
 
@@ -206,7 +241,7 @@ describe('runCh — без --message (генерація omlx)', () => {
     const code = await runCh([], {
       log: collector().log,
       run: spy.run,
-      context: ctx(['npm/ch.js', 'docs/x.md'], ['npm']),
+      context: ctx(['npm/ch.js', 'pkg/b/x.js'], ['npm', 'pkg/b']),
       generate: (ws, files, repoRoot) => {
         genCalls.push({ ws, files, repoRoot })
         return Promise.resolve(`опис-${ws}`)
@@ -214,11 +249,10 @@ describe('runCh — без --message (генерація omlx)', () => {
     })
     expect(code).toBe(0)
     expect(genCalls).toEqual([
-      { ws: '.', files: ['docs/x.md'], repoRoot: '/repo' },
-      { ws: 'npm', files: ['npm/ch.js'], repoRoot: '/repo' }
+      { ws: 'npm', files: ['npm/ch.js'], repoRoot: '/repo' },
+      { ws: 'pkg/b', files: ['pkg/b/x.js'], repoRoot: '/repo' }
     ])
-    expect(spy.calls[0].args).toEqual(['change', '--bump', 'minor', '--section', 'Changed', '--message', 'опис-.'])
-    expect(spy.calls[1].args).toEqual([
+    expect(spy.calls[0].args).toEqual([
       'change',
       '--bump',
       'minor',
@@ -229,6 +263,17 @@ describe('runCh — без --message (генерація omlx)', () => {
       '--ws',
       'npm'
     ])
+    expect(spy.calls[1].args).toEqual([
+      'change',
+      '--bump',
+      'minor',
+      '--section',
+      'Changed',
+      '--message',
+      'опис-pkg/b',
+      '--ws',
+      'pkg/b'
+    ])
   })
 
   it('помилка генерації для воркспейса → пропуск + exit 1, інші пишуться', async () => {
@@ -237,12 +282,12 @@ describe('runCh — без --message (генерація omlx)', () => {
     const code = await runCh([], {
       log: io.log,
       run: spy.run,
-      context: ctx(['npm/ch.js', 'docs/x.md'], ['npm']),
-      generate: ws => (ws === '.' ? Promise.reject(new Error('omlx down')) : Promise.resolve('ok'))
+      context: ctx(['npm/ch.js', 'pkg/b/x.js'], ['npm', 'pkg/b']),
+      generate: ws => (ws === 'npm' ? Promise.reject(new Error('omlx down')) : Promise.resolve('ok'))
     })
     expect(code).toBe(1)
     expect(spy.calls.length).toBe(1)
-    expect(spy.calls[0].args.at(-1)).toBe('npm')
+    expect(spy.calls[0].args.at(-1)).toBe('pkg/b')
     expect(io.lines.join('\n')).toContain('omlx')
   })
 

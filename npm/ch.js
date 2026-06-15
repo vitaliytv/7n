@@ -7,7 +7,10 @@ import { ensureModel, loadOmlxConfig, omlxChat } from './omlx.mjs'
 
 // Тонка обгортка над `npx @nitra/cursor change`: ДОПОВНЮЄ дефолтами (bump=minor,
 // section=Changed), а РОЗТАШУВАННЯ change-файлу визначає АВТОМАТИЧНО — дивиться, у яких
-// воркспейсах є змінені файли (git), і пише окремий change у КОЖЕН зачеплений воркспейс.
+// воркспейсах є змінені файли (git), і пише окремий change у КОЖЕН зачеплений підпакет-воркспейс.
+// Цілі — ЛИШЕ підпакети з кореневого `workspaces` (їхні `.changes/` веде CHANGELOG); корінь
+// монорепо `n-changelog` не агрегує, тож кореневі/`docs/` файли пропускаємо (orphans). Якщо
+// підпакетів немає (однопакетне репо) — корінь сам є пакетом і стає ціллю.
 // `--message` ОПЦІЙНИЙ: якщо не задано — для КОЖНОГО воркспейса генерує опис локально через
 // omlx (OpenAI-сумісний MLX-сервер) з його diff, тобто аналізує зміни по воркспейсах окремо.
 // Сам запис change-файлу (ім'я YYMMDD-HHMM, анти-колізія, серіалізація) делегується каноном
@@ -25,7 +28,7 @@ const MAX_DIFF_LINES = 800
 const USAGE = [
   'Використання: npx @7n/n ch [--message "<опис>"] [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>]',
   `Без флага --bump → ${DEFAULT_BUMP}; без --section → ${DEFAULT_SECTION}.`,
-  'Воркспейс(и) визначаються автоматично за змінами в git — окремий change-файл у кожен зачеплений воркспейс.',
+  'Цілі — підпакети-воркспейси, зачеплені змінами git (окремий change-файл у кожен). Кореневі/docs-файли поза воркспейсами пропускаються (CHANGELOG для них не ведеться).',
   'Без --message опис кожного воркспейса генерується локально через omlx з його diff.',
   'Запис делегується npx @nitra/cursor change.'
 ].join('\n')
@@ -130,32 +133,36 @@ export function resolveWorkspaces(repoRoot) {
 }
 
 /**
- * Групує змінені файли за воркспейсом: кожен файл — до найдовшого воркспейса-префікса,
- * решта — до кореня `.`. Повертає відсортований список `{ ws, files }`.
+ * Планує цілі для change-файлів за змінами git. Валідні цілі — ЛИШЕ підпакети-воркспейси
+ * (їхні `.changes/` веде CHANGELOG). Корінь монорепо за наявності підпакетів НЕ є ціллю
+ * (`n-changelog` його не агрегує) — кореневі/`docs/` файли йдуть в `orphans` і пропускаються.
+ * Якщо підпакетів немає (однопакетне репо), корінь `.` сам є пакетом — тоді всі файли в `.`.
  * @param {string[]} changedPaths шляхи (posix, відносно кореня)
- * @param {string[]} workspaces відносні шляхи воркспейсів
- * @returns {Array<{ ws: string, files: string[] }>} зачеплені воркспейси з їхніми файлами
+ * @param {string[]} workspaces підпакети-воркспейси (з кореневого `workspaces`)
+ * @returns {{ groups: Array<{ ws: string, files: string[] }>, orphans: string[] }} цілі + позаворкспейсні файли
  */
-export function groupByWorkspace(changedPaths, workspaces) {
+export function planChanges(changedPaths, workspaces) {
+  // Однопакетне репо: кореневий package.json і є пакетом → усі зміни в `.`.
+  if (workspaces.length === 0) {
+    return { groups: changedPaths.length ? [{ ws: '.', files: [...changedPaths] }] : [], orphans: [] }
+  }
   const byLen = [...workspaces].sort((a, b) => b.length - a.length)
   /** @type {Map<string, string[]>} */
   const map = new Map()
+  const orphans = []
   for (const p of changedPaths) {
-    const ws = byLen.find(w => p === w || p.startsWith(`${w}/`)) ?? '.'
-    if (!map.has(ws)) map.set(ws, [])
-    map.get(ws).push(p)
+    const ws = byLen.find(w => p === w || p.startsWith(`${w}/`))
+    if (ws) {
+      if (!map.has(ws)) map.set(ws, [])
+      map.get(ws).push(p)
+    } else {
+      orphans.push(p)
+    }
   }
-  return [...map.entries()].map(([ws, files]) => ({ ws, files })).sort((a, b) => a.ws.localeCompare(b.ws))
-}
-
-/**
- * Зачеплені воркспейси (`.` — корінь), відсортовані. Тонка обгортка над `groupByWorkspace`.
- * @param {string[]} changedPaths шляхи (posix, відносно кореня)
- * @param {string[]} workspaces відносні шляхи воркспейсів
- * @returns {string[]} назви воркспейсів
- */
-export function affectedWorkspaces(changedPaths, workspaces) {
-  return groupByWorkspace(changedPaths, workspaces).map(g => g.ws)
+  const groups = [...map.entries()]
+    .map(([ws, files]) => ({ ws, files }))
+    .sort((a, b) => a.ws.localeCompare(b.ws))
+  return { groups, orphans }
 }
 
 /**
@@ -322,10 +329,19 @@ export async function runCh(argv, io = {}) {
     return 1
   }
 
-  let groups = groupByWorkspace(ctx.changed, ctx.workspaces)
+  const { groups, orphans } = planChanges(ctx.changed, ctx.workspaces)
+
+  if (orphans.length) {
+    log(
+      `ℹ️ Поза воркспейсами (CHANGELOG не ведеться, пропускаю): ${orphans.slice(0, 5).join(', ')}${
+        orphans.length > 5 ? ` … +${orphans.length - 5}` : ''
+      }`
+    )
+  }
+
   if (groups.length === 0) {
-    log('ℹ️ Змінених файлів не знайдено — пишу change у корінь.')
-    groups = [{ ws: '.', files: [] }]
+    log('✅ Немає змін у воркспейсах, що ведуть CHANGELOG — нічого створювати. 👋')
+    return 0
   }
 
   log(`📦 Зачеплені воркспейси: ${groups.map(g => (g.ws === '.' ? '<корінь>' : g.ws)).join(', ')}`)
