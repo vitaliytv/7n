@@ -37,3 +37,7 @@ Chosen option: "Виконання `n-fix` у ізольованому git-workt
 ## Update 2026-06-03
 
 Підтвердження preflight в реальному запуску: `git rev-parse --show-toplevel && git branch --show-current` виявило запуск у `main`; worktree автоматично створено командою `npx @nitra/cursor worktree add "main-fix" "n-fix: worktree-only skill"` за шляхом `/Users/vitalii/www/vitaliytv/7n/.worktrees/main-fix`. Перевірені артефакти: `.claude/hooks/capture-decisions.sh`, `.claude/hooks/normalize-decisions.sh` — збіглися з канонічними. Результат: всі перевірки `✅`, робоче дерево чисте.
+
+## Update 2026-06-05
+
+Підтверджено preflight-flow скіла `n-fix`: preflight-команда `git rev-parse --show-toplevel && git branch --show-current`. Якщо не під `.worktrees/` — автоматичне створення: `npx @nitra/cursor worktree add "main-fix" "n-fix: worktree-only skill"` → `.worktrees/main-fix`. Bootstrap: `bun install`. Перевірка правил: `npx @nitra/cursor fix` — результат `✨ Результат: 1/1 правил без зауважень`, `❌` відсутні. Конфігурація: `.cursor/skills/n-fix/SKILL.md`, `meta.json` → `worktree: true`.

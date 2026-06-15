@@ -47,3 +47,9 @@ Chosen option: "Change-файли як пріоритетне джерело, di
 
 - `npm/push.js:51–70` — виклик `pi -p --no-session --no-context-files --no-tools "$prompt"`
 - `npm/push.js:210–224` — збір `changes_list` і формування секції «ПЕРШОДЖЕРЕЛО» у `$ctx`
+
+## Update 2026-06-05
+
+Реалізовано детермінований режим формування commit-меседжу: якщо є застейджені `.changes/*.md` файли, commit-меседж будується скриптово (функція `_n7push_build_message_from_changes`), LLM використовується лише як фолбек за відсутності change-файлів.
+
+Маппінг секцій: `Added` → `✨ feat`, `Changed` → `♻️ refactor`, `Fixed` → `🐛 fix`, інше → `📦 chore`. За кількох change-файлів: `bump`-пріоритет (`major` > `minor` > `patch`) визначає type; scope виводиться зі спільного батьківського каталогу. Індикатор у stdout: `🧩 Збираю commit-меседж зі change-файлів (.changes/) — без LLM...`. Тести: 3 нові кейси; 21 pass (push-suite), 60 pass (повний). Майбутній контекст (не реалізовано): флаг `llm: true` у change-файлі для opt-in у LLM-режим навіть за наявності change-файлів.
