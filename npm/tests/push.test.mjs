@@ -79,6 +79,14 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-status "$base" --')
   })
 
+  it('docs/ у scope-контексті для LLM завжди згортається до кількості', () => {
+    expect(PUSH_ZSH_SCRIPT).toContain("grep -vE '(^|[[:space:]/])docs/'")
+    expect(PUSH_ZSH_SCRIPT).toContain("grep -cE '(^|[[:space:]/])docs/'")
+    expect(PUSH_ZSH_SCRIPT).toContain('загально змінено $docs_n файл(ів) у docs/ директоріях')
+    // Без порогу: жодної гілки з лічильником файлів.
+    expect(PUSH_ZSH_SCRIPT).not.toContain('names_n > 10')
+  })
+
   it('change-файли — пріоритетне джерело меседжу, diff лише за їх відсутності', () => {
     expect(PUSH_ZSH_SCRIPT).toContain("grep -F '.changes/'")
     expect(PUSH_ZSH_SCRIPT).toContain('if [[ -n "$changes_list" ]]; then')

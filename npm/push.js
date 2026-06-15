@@ -14,7 +14,8 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 // Меседж: ЯКЩО є застейджені change-файли (.changes/*.md) — збираємо його ДЕТЕРМІНОВАНО, БЕЗ LLM
 // (`_n7push_build_message_from_changes`): frontmatter section → emoji/type, scope зі шляхів, summary із
 // тіла найвагомішого (за bump) change-файлу, тіло — по булету на файл. ЛИШЕ якщо change-файлів немає —
-// меседж генерує LLM-агент (`pi` → `claude` → `cursor-agent`) з diff: ПОВНИЙ перелік файлів (scope), але
+// меседж генерує LLM-агент (`pi` → `claude` → `cursor-agent`) з diff: перелік файлів (scope), де docs/-файли
+// ЗАВЖДИ згортаються в підсумок-кількість («загально змінено N файлів у docs/»), а решта перелічена поіменно;
 // БЕЗ вмісту шумних шляхів (docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build)
 // і обрізаний за рядками. N7COMMIT_FORCE_LLM=1 примушує LLM навіть за наявних change-файлів (тоді вони —
 // контекст). Шум: N7COMMIT_NO_DEFAULT_EXCLUDE, N7COMMIT_EXCLUDE, N7COMMIT_MAX_DIFF_LINES. ADR у stdout — кількістю.
@@ -348,8 +349,15 @@ push() {
         local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
         ctx=$(mktemp)
         {
-            echo "# Усі змінені файли (повний перелік, scope):"
-            git diff --cached --name-status "$base" --
+            # Перелік файлів (scope). docs/-файли ЗАВЖДИ згортаємо в підсумок-кількість (навіть один):
+            # вони — наратив, не суть коду й не несуть сенсу для меседжу, лише роздувають контекст і
+            # збивають фокус. "docs/" розпізнаємо як сегмент шляху (на початку, після таба чи "/").
+            local names_full docs_n
+            names_full=$(git diff --cached --name-status "$base" --)
+            docs_n=$(print -r -- "$names_full" | grep -cE '(^|[[:space:]/])docs/')
+            echo "# Змінені файли (scope; docs/ згорнуто до кількості):"
+            print -r -- "$names_full" | grep -vE '(^|[[:space:]/])docs/'
+            (( docs_n > 0 )) && echo "# (+ загально змінено $docs_n файл(ів) у docs/ директоріях)"
             echo ""
             if [[ -n "$changes_list" ]]; then
                 echo "# Change-файли (.changes/) — ПЕРШОДЖЕРЕЛО наміру коміту; будуй меседж насамперед на них"
