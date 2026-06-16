@@ -72,7 +72,14 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/.changes/**')
     expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)*.lock')
     expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/*.d.ts')
-    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached "$base" -- . "${noise[@]}"')
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-only "$base" -- . "${noise[@]}"')
+  })
+
+  it('виключає вміст трейсів n-cursor (.n-cursor/**) і JSONL-дампів (*.jsonl) із diff-контексту', () => {
+    // llm-trace.jsonl (мегабайти в одній лінії) сортувався першим (.n-cursor) і з'їдав увесь байт-бюджет head -c.
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude).n-cursor/**')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/.n-cursor/**')
+    expect(PUSH_ZSH_SCRIPT).toContain(':(exclude)**/*.jsonl')
   })
 
   it('повний перелік файлів (scope) дає агенту попри виключення вмісту', () => {
@@ -92,7 +99,7 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('if [[ -n "$changes_list" ]]; then')
     expect(PUSH_ZSH_SCRIPT).toContain('git show ":$cf"')
     // diff-фолбек (із виключенням шуму) — у гілці else, тобто коли change-файлів немає.
-    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached "$base" -- . "${noise[@]}"')
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-only "$base" -- . "${noise[@]}"')
   })
 
   it('за наявних change-файлів меседж збирається ДЕТЕРМІНОВАНО, БЕЗ LLM', () => {
@@ -134,6 +141,7 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_NO_DEFAULT_EXCLUDE:-0}')
     expect(PUSH_ZSH_SCRIPT).toContain('${(z)N7COMMIT_EXCLUDE:-}')
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_LINES:-1500}')
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_FILE_BYTES:-16384}')
   })
 
   it('prompt передається агентам через STDIN (< "$pf"), а не argv — інакше великий diff дає E2BIG', () => {
@@ -154,7 +162,23 @@ describe('PUSH_ZSH_SCRIPT', () => {
     // Один мініфікований/згенерований рядок на мегабайти роздув ctx до 5+ MB при 1326 рядках.
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_LINE:-500}')
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_BYTES:-262144}')
-    expect(PUSH_ZSH_SCRIPT).toContain('head -n "$maxl" "$full" | cut -c "1-$maxcol" | head -c "$maxbytes"')
+    // Трирівневе обрізання застосовується ПО ФАЙЛАХ (per-file cap), а не одним глобальним head -c.
+    expect(PUSH_ZSH_SCRIPT).toContain(
+      'git diff --cached "$base" -- "$f" | head -n "$maxl" | cut -c "1-$maxcol" | head -c "$cap"'
+    )
+  })
+
+  it('diff ріжеться РІВНОМІРНО: кожен файл має власний байт-бюджет, жоден не монополізує стелю', () => {
+    // Корінь: глобальний head -c брав перші байти в алфавіт-порядку шляхів → .n-cursor/llm-trace.jsonl
+    // (раннє ім'я, 5+ MB) з'їдав усю стелю й витісняв решту файлів. Тепер cap = min(per-file, залишок глоб.).
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_FILE_BYTES:-16384}')
+    expect(PUSH_ZSH_SCRIPT).toContain('(( cap = maxfilebytes < remain ? maxfilebytes : remain ))')
+    // Ітерація по змінених (не-шумних) файлах окремо, а не один суцільний diff.
+    expect(PUSH_ZSH_SCRIPT).toContain('git diff --cached --name-only "$base" -- . "${noise[@]}"')
+    // Вичерпання глобальної стелі — решта файлів лишається кількістю, а не ріжеться до нуля.
+    expect(PUSH_ZSH_SCRIPT).toContain('if (( used >= maxbytes )); then omit_n=$(( ${#changed} - proc )); break; fi')
+    // Старий суцільний глобальний зріз більше не використовується.
+    expect(PUSH_ZSH_SCRIPT).not.toContain('head -n "$maxl" "$full" | cut -c "1-$maxcol" | head -c "$maxbytes"')
   })
 
   it('таймлайн увімкнено за замовчуванням, вимикається лише явним N7COMMIT_DEBUG=0', () => {

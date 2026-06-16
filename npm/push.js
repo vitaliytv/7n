@@ -17,8 +17,10 @@ import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 // меседж генерує LLM-агент (`pi` → `claude` → `cursor-agent`) з diff: перелік файлів (scope), де docs/-файли
 // ЗАВЖДИ згортаються в підсумок-кількість («загально змінено N файлів у docs/»), а решта перелічена поіменно;
 // БЕЗ вмісту шумних шляхів (docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots, build)
-// і обрізаний за рядками. N7COMMIT_FORCE_LLM=1 примушує LLM навіть за наявних change-файлів (тоді вони —
-// контекст). Шум: N7COMMIT_NO_DEFAULT_EXCLUDE, N7COMMIT_EXCLUDE, N7COMMIT_MAX_DIFF_LINES. ADR у stdout — кількістю.
+// і обрізаний за рядками; .n-cursor/** та *.jsonl (трейси LLM) виключено так само. N7COMMIT_FORCE_LLM=1 примушує LLM навіть за наявних change-файлів (тоді вони —
+// контекст). Diff ріжеться РІВНОМІРНО по файлах (per-file байт-бюджет N7COMMIT_MAX_FILE_BYTES), тож жоден один
+// великий файл не з'їдає всю стелю. Шум: N7COMMIT_NO_DEFAULT_EXCLUDE, N7COMMIT_EXCLUDE, N7COMMIT_MAX_DIFF_LINES,
+// N7COMMIT_MAX_FILE_BYTES, N7COMMIT_MAX_DIFF_BYTES. ADR у stdout — кількістю.
 const ZSH_SCRIPT = `
 ${MERGE_ZSH_LIB}
 
@@ -332,6 +334,9 @@ push() {
                 ':(exclude)**/docs/**'         # docs/ у будь-якому під-workspace
                 ':(exclude)**/CHANGELOG.md'    # генерується CI з change-файлів
                 ':(exclude)**/.changes/**'     # change-файли (bookkeeping)
+                ':(exclude).n-cursor/**'       # трейси/стан n-cursor у корені — машинний bookkeeping
+                ':(exclude)**/.n-cursor/**'    # ...і в будь-якому під-workspace (llm-trace.jsonl тощо)
+                ':(exclude)**/*.jsonl'         # JSONL-дампи (трейси/логи): одна гігантська лінія монополізує байт-бюджет
                 ':(exclude)*.lock'             # bun.lock та інші *.lock
                 ':(exclude)**/package-lock.json'
                 ':(exclude)**/pnpm-lock.yaml'
@@ -358,6 +363,7 @@ push() {
         local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
         local maxcol=\${N7COMMIT_MAX_LINE:-500}
         local maxbytes=\${N7COMMIT_MAX_DIFF_BYTES:-262144}
+        local maxfilebytes=\${N7COMMIT_MAX_FILE_BYTES:-16384}
         ctx=$(mktemp)
         {
             # Перелік файлів (scope). docs/-файли ЗАВЖДИ згортаємо в підсумок-кількість (навіть один):
@@ -382,31 +388,47 @@ push() {
                 done <<< "$changes_list"
             else
                 echo "# Change-файлів немає — визнач суть із diff (вміст шумних шляхів виключено, обрізано):"
-                local full total clipped clipbytes
-                full=$(mktemp)
-                git diff --cached "$base" -- . "\${noise[@]}" > "$full"
-                # Тришарове обрізання, щоб контекст не роздувся й не перевищив ARG_MAX/context-вікно:
-                #   head -n  — за рядками (N7COMMIT_MAX_DIFF_LINES);
-                #   cut -c   — кожен рядок за довжиною (N7COMMIT_MAX_LINE): один мініфікований/згенерований
-                #              рядок на мегабайти (саме він роздув ctx до 5+ MB при 1326 рядках) не пройде;
-                #   head -c  — твердий стеля за байтами (N7COMMIT_MAX_DIFF_BYTES): захист від «багато довгих рядків».
-                clipped=$(mktemp)
-                head -n "$maxl" "$full" | cut -c "1-$maxcol" | head -c "$maxbytes" > "$clipped"
-                cat "$clipped"
-                total=$(wc -l < "$full")
-                clipbytes=$(wc -c < "$clipped" | tr -d ' ')
-                if (( total > maxl )); then
+                # РІВНОМІРНЕ обрізання ПО ФАЙЛАХ: глобальний head -c брав перші N байт у алфавітному порядку
+                # шляхів, тож ОДИН великий файл із раннім ім'ям (напр. .n-cursor/llm-trace.jsonl — 5+ MB) з'їдав
+                # усю байтову стелю й витісняв решту файлів із контексту. Тепер кожен файл дістає ВЛАСНИЙ
+                # байт-бюджет (N7COMMIT_MAX_FILE_BYTES), а глобальна стеля (N7COMMIT_MAX_DIFF_BYTES) лишається
+                # твердим backstop. На кожен файл — те саме тришарове обрізання: рядки (N7COMMIT_MAX_DIFF_LINES)
+                # → довжина рядка (N7COMMIT_MAX_LINE) → байти (per-file ∧ залишок глобальної стелі).
+                local -a changed
+                changed=( "\${(@f)$(git diff --cached --name-only "$base" -- . "\${noise[@]}")}" )
+                local f used remain cap before after trunc_n=0 omit_n=0 proc=0
+                local acc=$(mktemp)
+                for f in "\${changed[@]}"; do
+                    [[ -z "$f" ]] && continue
+                    used=$(wc -c < "$acc" | tr -d ' ')
+                    # Глобальна стеля вичерпана — решту файлів лишаємо як кількість (а не ріжемо до нуля байтів).
+                    if (( used >= maxbytes )); then omit_n=$(( \${#changed} - proc )); break; fi
+                    proc=$(( proc + 1 ))
+                    remain=$(( maxbytes - used ))
+                    (( cap = maxfilebytes < remain ? maxfilebytes : remain ))
+                    before=$used
+                    git diff --cached "$base" -- "$f" | head -n "$maxl" | cut -c "1-$maxcol" | head -c "$cap" >> "$acc"
+                    print -r -- "" >> "$acc"
+                    after=$(wc -c < "$acc" | tr -d ' ')
+                    # Вміст файлу вперся у власний cap → позначаємо обрізання (−1 байт на доданий вище \\n).
+                    if (( after - before - 1 >= cap )); then
+                        print -r -- "# … (вміст $f обрізано до ~$cap б)" >> "$acc"
+                        trunc_n=$(( trunc_n + 1 ))
+                    fi
+                done
+                cat "$acc"
+                if (( trunc_n > 0 )); then
                     echo ""
-                    echo "# … diff обрізано: показано $maxl з $total рядків (env N7COMMIT_MAX_DIFF_LINES)."
+                    echo "# … вміст $trunc_n файл(ів) обрізано (per-file ~$maxfilebytes б, env N7COMMIT_MAX_FILE_BYTES; рядки $maxl/N7COMMIT_MAX_DIFF_LINES, довжина $maxcol симв./N7COMMIT_MAX_LINE)."
                 fi
-                if (( clipbytes >= maxbytes )); then
+                if (( omit_n > 0 )); then
                     echo ""
-                    echo "# … diff обрізано за байтами до ~$maxbytes (env N7COMMIT_MAX_DIFF_BYTES; рядки — до $maxcol симв., env N7COMMIT_MAX_LINE)."
+                    echo "# … $omit_n файл(ів) пропущено — вичерпано глобальну стелю ~$maxbytes б (env N7COMMIT_MAX_DIFF_BYTES)."
                 fi
-                rm -f "$full" "$clipped"
+                rm -f "$acc"
             fi
         } > "$ctx"
-        _n7dbg "diff-контекст зібрано ($(wc -l < "$ctx" | tr -d ' ')рядк/$(wc -c < "$ctx" | tr -d ' ')б, ліміти $maxl рядк/$maxbytes б/$maxcol симв) → виклик LLM"
+        _n7dbg "diff-контекст зібрано ($(wc -l < "$ctx" | tr -d ' ')рядк/$(wc -c < "$ctx" | tr -d ' ')б, ліміти $maxl рядк/$maxbytes б глоб./$maxfilebytes б на файл/$maxcol симв) → виклик LLM"
 
         if ! _n7push_gen_message "$msg" "$ctx"; then
             echo "❌ Не вдалося згенерувати commit-меседж — коміт і push не виконано."
@@ -474,9 +496,11 @@ push "$1"
  * summary із тіла найвагомішого (за `bump`) change-файлу, тіло — по булету на файл. ЛИШЕ за відсутності
  * change-файлів меседж генерує LLM-агент (`pi` → `claude` → `cursor-agent`) з diff (повний перелік файлів +
  * diff БЕЗ вмісту шумних шляхів: docs/** включно з ADR, CHANGELOG, .changes, *.lock, *.d.ts, snapshots,
- * build, обрізаний). `N7COMMIT_FORCE_LLM=1` примушує LLM навіть за наявних change-файлів (вони стають
+ * build, .n-cursor/** та *.jsonl (трейси LLM), обрізаний). Diff ріжеться РІВНОМІРНО по файлах — кожен дістає
+ * власний байт-бюджет (`N7COMMIT_MAX_FILE_BYTES`, дефолт 16 KiB), тож жоден один великий файл не монополізує
+ * глобальну стелю `N7COMMIT_MAX_DIFF_BYTES`. `N7COMMIT_FORCE_LLM=1` примушує LLM навіть за наявних change-файлів (вони стають
  * контекстом). Шум конфігурується env `N7COMMIT_NO_DEFAULT_EXCLUDE`, `N7COMMIT_EXCLUDE`,
- * `N7COMMIT_MAX_DIFF_LINES`. Модель LLM-агента (лише для фолбеку) — env
+ * `N7COMMIT_MAX_DIFF_LINES`, `N7COMMIT_MAX_FILE_BYTES`, `N7COMMIT_MAX_DIFF_BYTES`. Модель LLM-агента (лише для фолбеку) — env
  * `N7COMMIT_MODEL` (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL` → `sonnet`) і `N7COMMIT_CURSOR_MODEL`
  * `N7COMMIT_PI_MODEL` (фолбек `N7MERGE_PI_MODEL`), для Claude — `N7COMMIT_MODEL`
  * (фолбек `N7MERGE_MODEL` → `GETW_MERGE_MODEL`), для Cursor — `N7COMMIT_CURSOR_MODEL`

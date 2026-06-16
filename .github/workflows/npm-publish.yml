@@ -36,6 +36,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # Anti-phantom: якщо git відстав від реєстру (commit-back колись програв гонку і npm
+      # пішов уперед) — піднімаємо локальну version до опублікованого «полу», щоб n-cursor
+      # додав bump ПОВЕРХ опублікованого, а не перерахував уже зайняту версію. Результат завжди
+      # вищий за реєстр → npm-publish (strategy=upgrade) гарантовано публікує, а не мовчки пропускає.
+      - name: Sync version floor to published
+        working-directory: npm
+        run: |
+          set -euo pipefail
+          NAME=$(node -p "require('./package.json').name")
+          LOCAL=$(node -p "require('./package.json').version")
+          PUB=$(npm view "$NAME" version 2>/dev/null || echo "0.0.0")
+          FLOOR=$(npx --yes semver "$LOCAL" "$PUB" | tail -n1)   # semver сортує зростанням → tail = max
+          echo "local=$LOCAL · published=$PUB · floor=$FLOOR"
+          if [ "$FLOOR" != "$LOCAL" ]; then
+            echo "::notice::git відставав від npm — version $LOCAL → $FLOOR (опубліковане); bump додасться поверх"
+            npm pkg set version="$FLOOR"
+          fi
+
       - name: Release (bump + CHANGELOG + tag)
         run: bunx n-cursor release
 
