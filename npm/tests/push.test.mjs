@@ -136,6 +136,27 @@ describe('PUSH_ZSH_SCRIPT', () => {
     expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_LINES:-1500}')
   })
 
+  it('prompt передається агентам через STDIN (< "$pf"), а не argv — інакше великий diff дає E2BIG', () => {
+    // Корінь падіння «argument list too long»: мегабайтний prompt у argv > ARG_MAX → execve E2BIG (rc=127).
+    expect(PUSH_ZSH_SCRIPT).toContain('print -r -- "$prompt" > "$pf"')
+    expect(PUSH_ZSH_SCRIPT).toContain('pi "${pi_args[@]}" < "$pf" > "$out" 2> "$err"')
+    expect(PUSH_ZSH_SCRIPT).toContain('claude -p --model "$claude_model" < "$pf" > "$out" 2> "$err"')
+    expect(PUSH_ZSH_SCRIPT).toContain(
+      'cursor-agent -p --force --output-format text --model "$cursor_model" < "$pf" > "$out" 2> "$err"'
+    )
+    // Жоден агент більше НЕ отримує "$prompt" позиційним аргументом.
+    expect(PUSH_ZSH_SCRIPT).not.toContain('"$prompt" > "$out"')
+    // Тимчасовий prompt-файл прибирається на всіх шляхах виходу функції.
+    expect(PUSH_ZSH_SCRIPT).toContain('rm -f "$err" "$pf"')
+  })
+
+  it('diff-контекст обрізається не лише за рядками, а й за довжиною рядка та байтами', () => {
+    // Один мініфікований/згенерований рядок на мегабайти роздув ctx до 5+ MB при 1326 рядках.
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_LINE:-500}')
+    expect(PUSH_ZSH_SCRIPT).toContain('${N7COMMIT_MAX_DIFF_BYTES:-262144}')
+    expect(PUSH_ZSH_SCRIPT).toContain('head -n "$maxl" "$full" | cut -c "1-$maxcol" | head -c "$maxbytes"')
+  })
+
   it('таймлайн увімкнено за замовчуванням, вимикається лише явним N7COMMIT_DEBUG=0', () => {
     // Дефолт :-1 → активно без env; гейт пропускає вивід, лише коли значення явно "0".
     expect(PUSH_ZSH_SCRIPT).toContain('[[ "${N7COMMIT_DEBUG:-1}" != "0" ]] || return 0')

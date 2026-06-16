@@ -87,6 +87,13 @@ $(cat "$ctx")"
     local tried_agent=0 last_rc=1
     _n7dbg "ген-меседж: старт · prompt=\${#prompt} символів · ctx=$ctx ($(wc -l < "$ctx" | tr -d ' ')рядк/$(wc -c < "$ctx" | tr -d ' ')б)"
 
+    # Prompt передаємо агентам через STDIN, а НЕ позиційним аргументом: великий diff (мегабайти) у argv
+    # перевищує ARG_MAX ОС (на macOS 1 MiB) → execve повертає E2BIG ("argument list too long") і бінарник
+    # навіть не стартує (rc=127, ~0.3s — це не падіння LLM, а неможливість його запустити). stdin цього
+    # ліміту не має. Пишемо prompt у файл і редиректимо < "$pf" — без SIGPIPE-гонок і без подвійної копії.
+    local pf=$(mktemp)
+    print -r -- "$prompt" > "$pf"
+
     if command -v pi > /dev/null 2>&1; then
         tried_agent=1
         err=$(mktemp)
@@ -99,12 +106,12 @@ $(cat "$ctx")"
         echo "🤖 Генерую commit-меседж через pi -p..." >&2
         _n7dbg "pi -p: запускаю · args=[\${pi_args[*]}] · model=\${pi_model:-<дефолт>}"
         t0=$EPOCHREALTIME
-        pi "\${pi_args[@]}" "$prompt" > "$out" 2> "$err"
+        pi "\${pi_args[@]}" < "$pf" > "$out" 2> "$err"
         rc=$?
         _n7dbg_agent_done "pi -p" "$t0" "$rc" "$out" "$err"
         if [[ "$rc" -eq 0 ]]; then
             [[ -s "$err" ]] && cat "$err" >&2
-            rm -f "$err"
+            rm -f "$err" "$pf"
             return 0
         fi
         _n7agent_report_failure "pi -p" "$rc" "$out" "$err"
@@ -119,12 +126,12 @@ $(cat "$ctx")"
         local claude_model="\${N7COMMIT_MODEL:-\${N7MERGE_MODEL:-\${GETW_MERGE_MODEL:-sonnet}}}"
         _n7dbg "claude -p: запускаю · model=$claude_model"
         t0=$EPOCHREALTIME
-        claude -p "$prompt" --model "$claude_model" > "$out" 2> "$err"
+        claude -p --model "$claude_model" < "$pf" > "$out" 2> "$err"
         rc=$?
         _n7dbg_agent_done "claude -p" "$t0" "$rc" "$out" "$err"
         if [[ "$rc" -eq 0 ]]; then
             [[ -s "$err" ]] && cat "$err" >&2
-            rm -f "$err"
+            rm -f "$err" "$pf"
             return 0
         fi
         _n7agent_report_failure "claude -p" "$rc" "$out" "$err"
@@ -139,12 +146,12 @@ $(cat "$ctx")"
         local cursor_model="\${N7COMMIT_CURSOR_MODEL:-\${N7MERGE_CURSOR_MODEL:-\${GETW_MERGE_CURSOR_MODEL:-claude-4.6-sonnet-medium}}}"
         _n7dbg "cursor-agent -p: запускаю · model=$cursor_model"
         t0=$EPOCHREALTIME
-        cursor-agent -p --force --output-format text --model "$cursor_model" "$prompt" > "$out" 2> "$err"
+        cursor-agent -p --force --output-format text --model "$cursor_model" < "$pf" > "$out" 2> "$err"
         rc=$?
         _n7dbg_agent_done "cursor-agent -p" "$t0" "$rc" "$out" "$err"
         if [[ "$rc" -eq 0 ]]; then
             [[ -s "$err" ]] && cat "$err" >&2
-            rm -f "$err"
+            rm -f "$err" "$pf"
             return 0
         fi
         _n7agent_report_failure "cursor-agent -p" "$rc" "$out" "$err"
@@ -154,10 +161,12 @@ $(cat "$ctx")"
 
     if [[ "$tried_agent" -eq 1 ]]; then
         echo "❌ Усі доступні LLM-агенти не спрацювали або fallback-и недоступні." >&2
+        rm -f "$pf"
         return "$last_rc"
     fi
 
     echo "❌ Немає pi, claude або cursor-agent у PATH — згенерувати меседж неможливо." >&2
+    rm -f "$pf"
     return 1
 }
 
@@ -347,6 +356,8 @@ push() {
         # стан (застейджене + незастейджене/untracked + локальні коміти). Якщо change-файли все ж є (режим
         # N7COMMIT_FORCE_LLM=1) — даємо їх як ПЕРШОДЖЕРЕЛО; інакше — diff без вмісту шумних шляхів.
         local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
+        local maxcol=\${N7COMMIT_MAX_LINE:-500}
+        local maxbytes=\${N7COMMIT_MAX_DIFF_BYTES:-262144}
         ctx=$(mktemp)
         {
             # Перелік файлів (scope). docs/-файли ЗАВЖДИ згортаємо в підсумок-кількість (навіть один):
@@ -371,19 +382,31 @@ push() {
                 done <<< "$changes_list"
             else
                 echo "# Change-файлів немає — визнач суть із diff (вміст шумних шляхів виключено, обрізано):"
-                local full total
+                local full total clipped clipbytes
                 full=$(mktemp)
                 git diff --cached "$base" -- . "\${noise[@]}" > "$full"
-                head -n "$maxl" "$full"
+                # Тришарове обрізання, щоб контекст не роздувся й не перевищив ARG_MAX/context-вікно:
+                #   head -n  — за рядками (N7COMMIT_MAX_DIFF_LINES);
+                #   cut -c   — кожен рядок за довжиною (N7COMMIT_MAX_LINE): один мініфікований/згенерований
+                #              рядок на мегабайти (саме він роздув ctx до 5+ MB при 1326 рядках) не пройде;
+                #   head -c  — твердий стеля за байтами (N7COMMIT_MAX_DIFF_BYTES): захист від «багато довгих рядків».
+                clipped=$(mktemp)
+                head -n "$maxl" "$full" | cut -c "1-$maxcol" | head -c "$maxbytes" > "$clipped"
+                cat "$clipped"
                 total=$(wc -l < "$full")
+                clipbytes=$(wc -c < "$clipped" | tr -d ' ')
                 if (( total > maxl )); then
                     echo ""
                     echo "# … diff обрізано: показано $maxl з $total рядків (env N7COMMIT_MAX_DIFF_LINES)."
                 fi
-                rm -f "$full"
+                if (( clipbytes >= maxbytes )); then
+                    echo ""
+                    echo "# … diff обрізано за байтами до ~$maxbytes (env N7COMMIT_MAX_DIFF_BYTES; рядки — до $maxcol симв., env N7COMMIT_MAX_LINE)."
+                fi
+                rm -f "$full" "$clipped"
             fi
         } > "$ctx"
-        _n7dbg "diff-контекст зібрано ($(wc -l < "$ctx" | tr -d ' ')рядк, ліміт $maxl) → виклик LLM"
+        _n7dbg "diff-контекст зібрано ($(wc -l < "$ctx" | tr -d ' ')рядк/$(wc -c < "$ctx" | tr -d ' ')б, ліміти $maxl рядк/$maxbytes б/$maxcol симв) → виклик LLM"
 
         if ! _n7push_gen_message "$msg" "$ctx"; then
             echo "❌ Не вдалося згенерувати commit-меседж — коміт і push не виконано."
