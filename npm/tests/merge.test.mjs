@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MERGE_ZSH_LIB, runZsh } from '../merge.js'
+import { MERGE_ZSH_LIB, runZsh } from '../src/merge.js'
 
 afterEach(() => vi.restoreAllMocks())
 

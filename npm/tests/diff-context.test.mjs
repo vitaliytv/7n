@@ -7,7 +7,7 @@ import {
   NOISE_GLOBS,
   renderZshNoiseArray,
   truncateContext
-} from '../diff-context.js'
+} from '../src/diff-context.js'
 
 describe('NOISE_GLOBS / excludePathspecs', () => {
   it('містить шумні шляхи, що вже кусали push (.n-cursor, *.jsonl) і класичні (docs/.changes/lock)', () => {

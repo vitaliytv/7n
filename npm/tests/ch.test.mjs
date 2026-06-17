@@ -9,8 +9,8 @@ import {
   planChanges,
   runCh,
   workspaceDiffContext
-} from '../ch.js'
-import { run } from '../index.js'
+} from '../src/ch.js'
+import { run } from '../src/index.js'
 
 const MESSAGE_ERR_RE = /опис/
 

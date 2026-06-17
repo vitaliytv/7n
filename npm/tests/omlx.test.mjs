@@ -12,7 +12,7 @@ import {
   validateResolution,
   RESOLVE_END,
   RESOLVE_START,
-} from '../omlx.mjs'
+} from '../src/omlx.mjs'
 
 // Фейковий fetch для chat-completions: дає черговий вихід зі списку (по виклику).
 const fakeFetch = outputs => {

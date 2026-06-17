@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { greet, run, version } from '../index.js'
+import { greet, run, version } from '../src/index.js'
 
 const SEMVER = /^\d+\.\d+\.\d+/
 

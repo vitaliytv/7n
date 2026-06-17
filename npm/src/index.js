@@ -30,7 +30,7 @@ const HELP = `@7n/n — CLI
  * @returns {string} версія пакета
  */
 export function version() {
-  const pkgPath = fileURLToPath(new URL('package.json', import.meta.url))
+  const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
   return JSON.parse(readFileSync(pkgPath, 'utf8')).version
 }
 

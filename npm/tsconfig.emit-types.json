@@ -8,10 +8,10 @@
     "moduleResolution": "NodeNext",
     "noEmit": false,
     "outDir": "types",
-    "rootDir": ".",
+    "rootDir": "src",
     "skipLibCheck": true,
     "target": "ESNext"
   },
-  "include": ["index.js"],
+  "include": ["src/index.js"],
   "exclude": ["**/node_modules/**", "**/tests/**", "types/**"]
 }

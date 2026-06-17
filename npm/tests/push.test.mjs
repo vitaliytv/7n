@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { PUSH_ZSH_SCRIPT, push } from '../push.js'
+import { PUSH_ZSH_SCRIPT, push } from '../src/push.js'
 
 afterEach(() => vi.restoreAllMocks())
 
