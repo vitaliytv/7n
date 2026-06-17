@@ -1,0 +1,49 @@
+npm/tests/omlx.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 15
+npm/src/omlx.mjs
+  s_d13cb93514317b::t_64fcd360403058 1-508
+npm/tests/ch.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 12-13
+npm/tests/merge.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 5
+npm/tests/pull.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 5
+npm/src/index.js
+  s_d13cb93514317b::t_64fcd360403058 1-32,34-92
+  s_d13cb93514317b::t_ecb79f63d5d417 33
+npm/tsconfig.emit-types.json
+  s_d13cb93514317b::t_d7f992942f0d78 11
+  s_d13cb93514317b::t_3c278c45009123 15
+npm/package.json
+  s_d13cb93514317b::t_a8bbffaafe8208 25,28,31
+npm/src/ch.js
+  s_d13cb93514317b::t_64fcd360403058 1-365
+npm/tests/push.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 5
+npm/tests/diff-context.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 10
+npm/bin/n.js
+  s_d13cb93514317b::t_818586e39da24d 2
+npm/tests/index.test.mjs
+  s_d13cb93514317b::t_12ad898f202c79 3
+npm/src/push.js
+  s_d13cb93514317b::t_64fcd360403058 1-505
+npm/src/diff-context.js
+  s_d13cb93514317b::t_64fcd360403058 1-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "8f5b4f1653549720e695d60bb0c41de7aab3a406",
+  "prompts": {},
+  "sessions": {
+    "s_d13cb93514317b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4fcd3d1f-5baa-4438-918d-fff526887fbc",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "vitaliytv <v@nitra.ai>"
+    }
+  }
+}
