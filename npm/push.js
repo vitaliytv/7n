@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 
+import { DEFAULT_LIMITS, renderZshNoiseArray } from './diff-context.js'
 import { MERGE_ZSH_LIB, runZsh } from './merge.js'
 
 // zsh-функція push: бере ВСІ локальні коміти (origin/<branch>..HEAD) + усі зміни робочого дерева
@@ -325,30 +326,13 @@ push() {
         # Шумні шляхи: їхній ВМІСТ не потрібен агенту, щоб визначити суть коміту (самі файли лишаються
         # в коміті — виключаємо лише з diff-контексту генерації меседжу; їхні ІМЕНА агент усе одно бачить
         # у name-status нижче). Дефолти вимикаються N7COMMIT_NO_DEFAULT_EXCLUDE=1; додаткові pathspec-глоби
-        # (пробіл-розділені) — через env N7COMMIT_EXCLUDE.
+        # (пробіл-розділені) — через env N7COMMIT_EXCLUDE. Перелік — зі спільного diff-context.js (єдине
+        # джерело правди для push і ch, щоб набори не розходились).
         local -a noise
         noise=()
         if [[ "\${N7COMMIT_NO_DEFAULT_EXCLUDE:-0}" != "1" ]]; then
             noise=(
-                ':(exclude)docs/**'            # вся документація в корені (ADR, гайди) — наратив, не суть коду
-                ':(exclude)**/docs/**'         # docs/ у будь-якому під-workspace
-                ':(exclude)**/CHANGELOG.md'    # генерується CI з change-файлів
-                ':(exclude)**/.changes/**'     # change-файли (bookkeeping)
-                ':(exclude).n-cursor/**'       # трейси/стан n-cursor у корені — машинний bookkeeping
-                ':(exclude)**/.n-cursor/**'    # ...і в будь-якому під-workspace (llm-trace.jsonl тощо)
-                ':(exclude)**/*.jsonl'         # JSONL-дампи (трейси/логи): одна гігантська лінія монополізує байт-бюджет
-                ':(exclude)*.lock'             # bun.lock та інші *.lock
-                ':(exclude)**/package-lock.json'
-                ':(exclude)**/pnpm-lock.yaml'
-                ':(exclude)**/yarn.lock'
-                ':(exclude)**/*.snap'          # тест-снапшоти
-                ':(exclude)**/__snapshots__/**'
-                ':(exclude)**/*.min.js'        # мініфіковане
-                ':(exclude)**/*.map'           # source maps
-                ':(exclude)**/*.d.ts'          # генеровані типи (з JSDoc)
-                ':(exclude)dist/**'            # білд-артефакти
-                ':(exclude)build/**'
-                ':(exclude)coverage/**'
+${renderZshNoiseArray()}
             )
         fi
         local extra
@@ -360,10 +344,10 @@ push() {
         # guard вище: після git add -A + git reset --soft "$base" це повна дельта origin..повний-локальний-
         # стан (застейджене + незастейджене/untracked + локальні коміти). Якщо change-файли все ж є (режим
         # N7COMMIT_FORCE_LLM=1) — даємо їх як ПЕРШОДЖЕРЕЛО; інакше — diff без вмісту шумних шляхів.
-        local maxl=\${N7COMMIT_MAX_DIFF_LINES:-1500}
-        local maxcol=\${N7COMMIT_MAX_LINE:-500}
-        local maxbytes=\${N7COMMIT_MAX_DIFF_BYTES:-262144}
-        local maxfilebytes=\${N7COMMIT_MAX_FILE_BYTES:-16384}
+        local maxl=\${N7COMMIT_MAX_DIFF_LINES:-${DEFAULT_LIMITS.maxLines}}
+        local maxcol=\${N7COMMIT_MAX_LINE:-${DEFAULT_LIMITS.maxLineLen}}
+        local maxbytes=\${N7COMMIT_MAX_DIFF_BYTES:-${DEFAULT_LIMITS.maxBytes}}
+        local maxfilebytes=\${N7COMMIT_MAX_FILE_BYTES:-${DEFAULT_LIMITS.maxFileBytes}}
         ctx=$(mktemp)
         {
             # Перелік файлів (scope). docs/-файли ЗАВЖДИ згортаємо в підсумок-кількість (навіть один):

@@ -54,3 +54,15 @@ else:
 Варіант `stash → ff → stash pop` відкинутий у тому ж transcript: переносить конфлікт у момент `pop`, не вирішуючи його.
 
 Деталі реалізації merge-алгоритму (`merge.js`): `merge-base` на рядку 245, `git diff` на рядках 252–257, далі `git apply` → `merge-file --diff3` → mergiraf → LLM-агент.
+
+## Update 2026-06-10
+
+**Reverse-delta як фолбек** (рішення по FF fallback уточнено):
+
+Первинний фолбек `_n7merge_delta "HEAD" "origin/<branch>"` (origin-дельта як unstaged, HEAD не рухається) замінено на **reverse-delta**: `git stash create` → `git reset --hard origin/<branch>` → `_n7merge_delta "origin/<branch>" "$backup_ref"`.
+
+Причина: forward-delta давала `git status` «behind origin» навіть після успішного pull і втягувала upstream-коміти у наступний `push`. Reverse-delta: HEAD = origin після успіху, uncommitted = лише локальна робота, повторний pull ідемпотентний.
+
+Варіант `stash → ff → stash pop` відхилено: `stash pop` при конфлікті пускає у стандартний git-merge (без mergiraf/LLM), що є downgrade резолвера.
+
+Страховка: `BACKUP_SHA` друкується у stdout до `reset --hard`; `trap ERR/INT/TERM` авто-відкочує до `git reset --hard $BACKUP_SHA && git stash apply $BACKUP_SHA`. Лейбли конфліктів: `ours`→«Приймач (origin/<branch>)», `theirs`→«Джерело ($backup_ref)». Smoke-тест підтвердив: pull з розбіжною історією (`0e0c006`..`0a295e7`) — `pull.js` і тести змерджились через Tier 1 (git), change-файл — через Tier 3 (LLM). Тести: `npm/tests/pull.test.mjs` (новий файл, 68+ зелених). Changelog: `npm/.changes/260610-1322.md` (bump: `minor`).

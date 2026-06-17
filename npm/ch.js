@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { stdout } from 'node:process'
 
+import { clampBytes, DEFAULT_LIMITS, excludePathspecs, truncateContext } from './diff-context.js'
 import { ensureModel, loadOmlxConfig, omlxChat } from './omlx.mjs'
 
 // Тонка обгортка над `npx @nitra/cursor change`: ДОПОВНЮЄ дефолтами (bump=minor,
@@ -13,6 +14,8 @@ import { ensureModel, loadOmlxConfig, omlxChat } from './omlx.mjs'
 // підпакетів немає (однопакетне репо) — корінь сам є пакетом і стає ціллю.
 // `--message` ОПЦІЙНИЙ: якщо не задано — для КОЖНОГО воркспейса генерує опис локально через
 // omlx (OpenAI-сумісний MLX-сервер) з його diff, тобто аналізує зміни по воркспейсах окремо.
+// Шумні шляхи (docs/.changes/lock/*.jsonl/.n-cursor/…) і ліміти обрізання — спільні з push через
+// diff-context.js, щоб набори не розходились.
 // Сам запис change-файлу (ім'я YYMMDD-HHMM, анти-колізія, серіалізація) делегується каноном
 // через npx; взаємодія через процесну межу. Користувач править файли вручну.
 
@@ -21,9 +24,6 @@ const DEFAULT_BUMP = 'minor'
 
 /** Дефолт section, якщо `--section` не задано. */
 const DEFAULT_SECTION = 'Changed'
-
-/** Максимум рядків diff-контексту, що шлемо в omlx (захист від величезних дифів). */
-const MAX_DIFF_LINES = 800
 
 const USAGE = [
   'Використання: npx @7n/n ch [--message "<опис>"] [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>]',
@@ -166,20 +166,11 @@ export function planChanges(changedPaths, workspaces) {
 }
 
 /**
- * Обрізає текст до перших `max` рядків, додаючи позначку про обрізання.
- * @param {string} text вхід
- * @param {number} max ліміт рядків
- * @returns {string} обрізаний текст
- */
-function truncateLines(text, max) {
-  const lines = text.split('\n')
-  if (lines.length <= max) return text
-  return `${lines.slice(0, max).join('\n')}\n… (обрізано: ${lines.length - max} рядків)`
-}
-
-/**
  * Збирає diff-контекст одного воркспейса для генерації меседжу: name-status + повний diff
- * проти HEAD (staged+unstaged) для його файлів + вміст untracked-файлів, обрізане до ліміту.
+ * проти HEAD (staged+unstaged) для його файлів + вміст untracked-файлів. Шумні шляхи виключаємо тим
+ * самим набором, що й push (`diff-context.js`), а контекст обрізаємо спільним трирівневим обрізанням
+ * (рядки → довжина рядка → байти); кожен untracked-файл додатково капаємо per-file байт-бюджетом, щоб
+ * один великий файл не монополізував контекст.
  * @param {string} repoRoot корінь репо
  * @param {string} ws воркспейс (`.` — корінь)
  * @param {string[]} files змінені файли воркспейса
@@ -188,6 +179,7 @@ function truncateLines(text, max) {
  */
 export function workspaceDiffContext(repoRoot, ws, files, execFn = execFileSync) {
   const pathspec = files.length ? files : [ws === '.' ? '.' : ws]
+  const exclude = excludePathspecs()
   const git = args => {
     try {
       return execFn('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoRoot, encoding: 'utf8' })
@@ -195,9 +187,9 @@ export function workspaceDiffContext(repoRoot, ws, files, execFn = execFileSync)
       return ''
     }
   }
-  const names = git(['diff', '--name-status', 'HEAD', '--', ...pathspec]).trim()
-  const diff = git(['diff', 'HEAD', '--', ...pathspec])
-  const untracked = git(['ls-files', '--others', '--exclude-standard', '--', ...pathspec])
+  const names = git(['diff', '--name-status', 'HEAD', '--', ...pathspec, ...exclude]).trim()
+  const diff = git(['diff', 'HEAD', '--', ...pathspec, ...exclude])
+  const untracked = git(['ls-files', '--others', '--exclude-standard', '--', ...pathspec, ...exclude])
     .split('\n')
     .filter(Boolean)
   const parts = [`Змінені файли:\n${names || '(нема відстежуваних змін)'}`]
@@ -205,13 +197,13 @@ export function workspaceDiffContext(repoRoot, ws, files, execFn = execFileSync)
   for (const f of untracked) {
     let content = ''
     try {
-      content = readFileSync(join(repoRoot, f), 'utf8')
+      content = clampBytes(readFileSync(join(repoRoot, f), 'utf8'), DEFAULT_LIMITS.maxFileBytes)
     } catch {
       content = ''
     }
     parts.push(`Новий файл ${f}:\n${content}`)
   }
-  return truncateLines(parts.join('\n\n'), MAX_DIFF_LINES)
+  return truncateContext(parts.join('\n\n'))
 }
 
 /**

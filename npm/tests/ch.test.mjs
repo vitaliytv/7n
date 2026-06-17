@@ -7,7 +7,8 @@ import {
   parseChArgs,
   parsePorcelainZ,
   planChanges,
-  runCh
+  runCh,
+  workspaceDiffContext
 } from '../ch.js'
 import { run } from '../index.js'
 
@@ -108,6 +109,41 @@ describe('parsePorcelainZ', () => {
 
   it('порожній вивід → []', () => {
     expect(parsePorcelainZ('')).toEqual([])
+  })
+})
+
+describe('workspaceDiffContext', () => {
+  /** Збирає всі git-виклики й повертає порожній вивід (контекст нас не цікавить, лише аргументи). */
+  function gitSpy() {
+    const calls = []
+    const execFn = (_cmd, args) => {
+      calls.push(args)
+      return ''
+    }
+    return { calls, execFn }
+  }
+
+  it('усі git-виклики (diff/name-status/ls-files) дістають виключення шуму (.n-cursor, *.jsonl)', () => {
+    const { calls, execFn } = gitSpy()
+    workspaceDiffContext('/repo', 'npm', ['npm/ch.js'], execFn)
+    // три git-виклики, у кожному — pathspec файла + :(exclude) глоби
+    expect(calls).toHaveLength(3)
+    for (const args of calls) {
+      expect(args).toContain('npm/ch.js')
+      expect(args).toContain(':(exclude).n-cursor/**')
+      expect(args).toContain(':(exclude)**/*.jsonl')
+      expect(args).toContain(':(exclude)docs/**')
+    }
+  })
+
+  it('виключення йдуть ПІСЛЯ роздільника -- (як pathspec, а не опції)', () => {
+    const { calls, execFn } = gitSpy()
+    workspaceDiffContext('/repo', '.', [], execFn)
+    for (const args of calls) {
+      const sep = args.indexOf('--')
+      expect(sep).toBeGreaterThanOrEqual(0)
+      expect(args.indexOf(':(exclude)docs/**')).toBeGreaterThan(sep)
+    }
   })
 })
 

@@ -38,3 +38,17 @@ Benchmark (omlx 0.4.3, 16 GB Apple Silicon):
 Завантаження E4B: `POST /admin/api/hf/download` з `repo_id: "mlx-community/gemma-4-e4b-it-OptiQ-4bit"`, task_id: `50e3d226-4de6-4354-be78-789c0e803843`.
 Змінені параметри `~/.omlx/settings.json`: `memory_guard_tier: "custom"`, `memory_guard_custom_ceiling_gb: 12.0`, `chunked_prefill: true`, `auth.api_key: "omlx-local-test-key"`. Backup: `~/.omlx/settings.json.bak.1781072139`.
 Gemma 4 патчі включені в omlx `v0.4.3` через пін `mlx-lm@39c4019` — окремого оновлення `mlx-lm` не потрібно.
+
+## Update 2026-06-10
+
+**gemma4.sanitize() регресія для per-layer квантованих моделей (omlx 0.4.3 / mlx-lm):**
+
+`mlx-community/gemma-4-12B-it-OptiQ-4bit` та `gemma-4-12B-it-qat-4bit` не завантажувались з помилкою «Missing 711 parameters». Корінна причина: метод `sanitize()` у `mlx_lm/models/gemma4.py` (регресія коміту `8239c72`, 2026-06-05) знімав префікс `language_model.` з ключів ваг, після чого per-layer quant config зі специфікаціями `"language_model.model.embed_tokens": {...}` не знаходив шарів у `_quantize()`. Тимчасовий патч brew-venv (рядки 69–78 `sanitize()`): прибрати неправильний strip, залишивши лише фільтрацію vision/audio ключів. Після патчу `gemma-4-12B-it-OptiQ-4bit` завантажилась і пройшла 4/4 тестових задач. Відмінність: `gemma-4-e4b-it-OptiQ-4bit` (`model_type: gemma4`) — плаский quant config, патч не потрібен; 12B-моделі (`model_type: gemma4_unified`) — per-layer quant, патч потрібен. Патч локальний: `brew upgrade omlx` перезапише. PR до апстріму mlx-lm у transcript не відкривався.
+
+## Update 2026-06-10
+
+**Підсумок порівняння моделей та остаточні рішення для 16 GB Mac:**
+
+`mlx-community/gemma-4-e4b-it-OptiQ-4bit` (4B, 7.5 GB, `model_type: gemma4`) обрана основною моделлю: 4/4 тестів (UA history 1654, missing dollar, sheep trap, RLE Python 6/6 unit tests), ~28 tps, вкладається у 16 GB без memory ceiling issues. `rajaschitnis/gemma-4-12b-it-text-only-4bit-mlx` — 10 tps без chunked_prefill / 4.5 tps з ним, провалила RLE (не повернула content). `Qwen3-4B-Thinking-2507-4bit` — зациклення на UA-history, проімперський наратив, wandering у reasoning.
+
+`gemma-4-12B-it-OptiQ-4bit` і `gemma-4-12B-it-qat-4bit` видалені (`DELETE /admin/api/hf/models/{name}`, ~18.5 GB вивільнено): архітектура `gemma4_unified` несумісна з omlx 0.4.3 на рівні quant-завантаження навіть після mlx-lm HEAD 0.31.3 та локального патчу `sanitize()`. mlx-lm HEAD: `pip install --upgrade --force-reinstall --no-deps "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@main"` → `mlx_lm-0.31.3`; відкат: `brew reinstall omlx`. Статичний api_key: `~/.omlx/settings.json` → `"api_key": "omlx-local-test-key"` (localhost-only); harness: `curl -H "Authorization: Bearer omlx-local-test-key"`. Тест-скрипт: `/tmp/omlx_ask.py`, endpoint `http://127.0.0.1:8000/v1/chat/completions`.
