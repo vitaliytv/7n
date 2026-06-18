@@ -10,6 +10,23 @@ const trunc = lines => {
   return s.length > 70 ? `${s.slice(0, 67)}…` : s
 }
 
+// Живий прогрес резолву → stderr (stdout захоплює zsh для розділу Tier 3). Перетворює події ядра
+// (omlx.mjs) на людські рядки, щоб довгий generate-validate цикл не виглядав як «зависло».
+const reportProgress = event => {
+  if (event.type === 'start') {
+    process.stderr.write(`🤖 Локальний omlx: ${event.files} файл(и), модель ${event.model} @ ${event.url}\n`)
+  } else if (event.type === 'file') {
+    process.stderr.write(`📄 [${event.index}/${event.total}] ${event.file} — ${event.hunks} конфліктних хунк(и)\n`)
+  } else if (event.type === 'attempt' && event.attempt === 1) {
+    process.stderr.write(`   hunk ${event.hunkIndex}/${event.hunkTotal} · спроба 1 (t=${event.temperature}) · OURS: ${trunc(event.ours)} ↔ THEIRS: ${trunc(event.theirs)}\n`)
+  } else if (event.type === 'attempt') {
+    // attempt>0 несе feedback — причину відхилення попередньої спроби (point 4).
+    process.stderr.write(`   ↻ відхилено: ${trunc(event.feedback)} → спроба ${event.attempt}/${event.total} (t=${event.temperature})\n`)
+  } else if (event.type === 'json-retry') {
+    process.stderr.write(`   🔧 JSON невалідний — пере-резолв (pass ${event.pass}/${event.total})\n`)
+  }
+}
+
 /**
  * Резолвить передані файли через локальний omlx, друкує per-file підсумок у stdout.
  * @param {string[]} files
@@ -21,7 +38,7 @@ async function main(files) {
     return 1
   }
   try {
-    const { ok, summary } = await resolveFiles(files, loadOmlxConfig())
+    const { ok, summary } = await resolveFiles(files, loadOmlxConfig(), { onProgress: reportProgress })
     for (const s of summary) {
       process.stdout.write(`📄 ${s.file}: розвʼязано ${s.resolved}, не вдалося ${s.failed}\n`)
       for (const d of s.details) {

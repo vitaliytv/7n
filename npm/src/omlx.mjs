@@ -89,7 +89,7 @@ export async function omlxChat(messages, cfg, opts = {}, fetchFn = fetch) {
   const data = await res.json()
   const content = data?.choices?.[0]?.message?.content
   if (typeof content !== 'string') {
-    throw new Error(`omlx: немає content у відповіді: ${JSON.stringify(data).slice(0, 300)}`)
+    throw new TypeError(`omlx: немає content у відповіді: ${JSON.stringify(data).slice(0, 300)}`)
   }
   return content
 }
@@ -221,10 +221,10 @@ export function extractResolved(output) {
   while (lines.length && lines.at(-1).trim() === '') {
     lines.pop()
   }
-  if (lines.length && /^```/.test(lines[0])) {
+  if (lines.length && lines[0].startsWith('```')) {
     lines.shift()
   }
-  if (lines.length && /^```/.test(lines.at(-1))) {
+  if (lines.length && lines.at(-1).startsWith('```')) {
     lines.pop()
   }
   return lines
@@ -381,13 +381,16 @@ function buildMessages(hunk, feedback, extraRule = '') {
  * @param {object} cfg
  * @param {typeof fetch} [fetchFn]
  * @param {string} [extraRule] - додаткове правило system (напр. вимога валідного JSON)
+ * @param {(e:object)=>void} [onProgress] - подія на старті кожної спроби (для живого прогресу)
  * @returns {Promise<{ok:boolean,resolved?:string[],attempts?:number,reasons?:string}>}
  */
-export async function resolveHunk(hunk, cfg, fetchFn = fetch, extraRule = '') {
+export async function resolveHunk(hunk, cfg, fetchFn = fetch, extraRule = '', onProgress = () => {}) {
   const temps = [0, 0.3, 0.6]
   let feedback = ''
   for (let attempt = 0; attempt <= cfg.retries; attempt++) {
     const temperature = temps[Math.min(attempt, temps.length - 1)]
+    // attempt-подія перед HTTP-викликом: при attempt>0 feedback != '' — це причина ретраю (point 4).
+    onProgress({ type: 'attempt', attempt: attempt + 1, total: cfg.retries + 1, temperature, ours: hunk.ours, theirs: hunk.theirs, feedback })
     const out = await omlxChat(buildMessages(hunk, feedback, extraRule), cfg, { temperature }, fetchFn)
     const resolved = extractResolved(out)
     const { ok, reasons } = validateResolution(hunk, resolved, { strict: cfg.strict })
@@ -414,17 +417,23 @@ const isValidJson = text => {
  * @param {object} cfg
  * @param {typeof fetch} fetchFn
  * @param {string} extraRule
+ * @param {(e:object)=>void} [onProgress] - проброшується у resolveHunk, збагачений індексом хунка
  * @returns {Promise<{resolved:number,failed:number,details:object[]}>}
  */
-async function resolvePass(segments, cfg, fetchFn, extraRule) {
+async function resolvePass(segments, cfg, fetchFn, extraRule, onProgress = () => {}) {
   let resolved = 0
   let failed = 0
   const details = []
+  const hunkTotal = segments.filter(s => s.type === 'conflict').length
+  let hunkIndex = 0
   for (const seg of segments) {
     if (seg.type !== 'conflict') {
       continue
     }
-    const r = await resolveHunk(seg, cfg, fetchFn, extraRule)
+    hunkIndex++
+    const i = hunkIndex
+    const hunkProgress = e => onProgress({ ...e, hunkIndex: i, hunkTotal })
+    const r = await resolveHunk(seg, cfg, fetchFn, extraRule, hunkProgress)
     if (r.ok) {
       seg.resolved = r.resolved
       resolved++
@@ -445,23 +454,28 @@ async function resolvePass(segments, cfg, fetchFn, extraRule) {
  * @param {string} text
  * @param {object} cfg
  * @param {typeof fetch} [fetchFn]
- * @param {{isJson?:boolean}} [opts]
+ * @param {{isJson?:boolean,onProgress?:(e:object)=>void,file?:string,fileIndex?:number,fileTotal?:number}} [opts]
  * @returns {Promise<{text:string,resolved:number,failed:number,details:object[]}>}
  */
 export async function resolveFileText(text, cfg, fetchFn = fetch, opts = {}) {
+  const onProgress = opts.onProgress || (() => {})
   const segments = parseConflicts(text)
-  if (!segments.some(s => s.type === 'conflict')) {
+  const conflicts = segments.filter(s => s.type === 'conflict')
+  if (conflicts.length === 0) {
     return { text, resolved: 0, failed: 0, details: [] }
   }
+  // Заголовок файлу (point 2): індекс/усього + кількість хунків — одразу видно масштаб роботи.
+  onProgress({ type: 'file', file: opts.file, index: opts.fileIndex, total: opts.fileTotal, hunks: conflicts.length })
   const jsonRule = opts.isJson
     ? '- Цей фрагмент — частина JSON-файлу: результат МУСИТЬ лишатися валідним JSON (зокрема коми між полями).'
     : ''
   const maxPasses = opts.isJson ? cfg.retries : 0
 
-  let pass = await resolvePass(segments, cfg, fetchFn, jsonRule)
+  let pass = await resolvePass(segments, cfg, fetchFn, jsonRule, onProgress)
   let out = reconstruct(segments)
   for (let p = 1; p <= maxPasses && opts.isJson && pass.failed === 0 && !isValidJson(out); p++) {
-    pass = await resolvePass(segments, cfg, fetchFn, `${jsonRule} Попередній результат давав НЕВАЛІДНИЙ JSON — виправ синтаксис (ймовірно бракує коми).`)
+    onProgress({ type: 'json-retry', pass: p + 1, total: maxPasses + 1 })
+    pass = await resolvePass(segments, cfg, fetchFn, `${jsonRule} Попередній результат давав НЕВАЛІДНИЙ JSON — виправ синтаксис (ймовірно бракує коми).`, onProgress)
     out = reconstruct(segments)
   }
   // V8-вердикт: JSON досі невалідний (попри ok-хунки) → лишаємо маркери на ручний резолв.
@@ -486,18 +500,29 @@ export async function resolveFileText(text, cfg, fetchFn = fetch, opts = {}) {
  * Читає → резолвить → пише кожен файл. Якщо модель не задана — бере дефолт із `/v1/models`.
  * @param {string[]} files
  * @param {object} cfg
- * @param {{readFile?:typeof readFileSync,writeFile?:typeof writeFileSync,fetch?:typeof fetch}} [deps]
+ * @param {{readFile?:typeof readFileSync,writeFile?:typeof writeFileSync,fetch?:typeof fetch,onProgress?:(e:object)=>void}} [deps]
  * @returns {Promise<{ok:boolean,summary:object[]}>}
  */
 export async function resolveFiles(files, cfg, deps = {}) {
   const read = deps.readFile || readFileSync
   const write = deps.writeFile || writeFileSync
   const fetchFn = deps.fetch || fetch
+  const onProgress = deps.onProgress || (() => {})
   const resolved = { ...cfg, model: cfg.model || (await ensureModel(cfg, fetchFn)) }
+  // Старт-заголовок (point 1): скільки файлів, яка модель і куди стукаємо — після ensureModel модель
+  // вже відома (могла дотягнутись із /v1/models). Емітимо до першого довгого HTTP-резолву.
+  onProgress({ type: 'start', files: files.length, model: resolved.model, url: resolved.url })
   const summary = []
   let anyFailed = false
-  for (const file of files) {
-    const res = await resolveFileText(read(file, 'utf8'), resolved, fetchFn, { isJson: /\.json$/i.test(file) })
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    const res = await resolveFileText(read(file, 'utf8'), resolved, fetchFn, {
+      isJson: /\.json$/i.test(file),
+      onProgress,
+      file,
+      fileIndex: i + 1,
+      fileTotal: files.length,
+    })
     write(file, res.text)
     if (res.failed) {
       anyFailed = true

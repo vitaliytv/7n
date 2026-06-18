@@ -72,7 +72,10 @@ _n7merge_resolve_with_agent() {
     local out rc
     out=$(mktemp)
     # \${(@f)files} — кожен рядок списку окремим argv (зберігає пробіли в іменах, без word-splitting).
-    node "$N7MERGE_RESOLVER" "\${(@f)files}" > "$out" 2>&1
+    # ЛИШЕ stdout у файл (per-file підсумок → summary_out); stderr НЕ редіректимо — це живий прогрес
+    # резолвера (старт/файл/хунк/ретрай) у термінал, щоб довгий generate-validate цикл не виглядав як
+    # «зависло». Помилки резолвера теж ідуть у stderr → одразу видно, без чекання на завершення.
+    node "$N7MERGE_RESOLVER" "\${(@f)files}" > "$out"
     rc=$?
     if [[ "$rc" -eq 0 ]]; then
         # Підсумок резолвера віддаємо ядру (через summary_out), щоб показати у розділі Tier 3.
