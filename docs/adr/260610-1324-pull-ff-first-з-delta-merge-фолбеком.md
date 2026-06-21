@@ -66,3 +66,19 @@ else:
 Варіант `stash → ff → stash pop` відхилено: `stash pop` при конфлікті пускає у стандартний git-merge (без mergiraf/LLM), що є downgrade резолвера.
 
 Страховка: `BACKUP_SHA` друкується у stdout до `reset --hard`; `trap ERR/INT/TERM` авто-відкочує до `git reset --hard $BACKUP_SHA && git stash apply $BACKUP_SHA`. Лейбли конфліктів: `ours`→«Приймач (origin/<branch>)», `theirs`→«Джерело ($backup_ref)». Smoke-тест підтвердив: pull з розбіжною історією (`0e0c006`..`0a295e7`) — `pull.js` і тести змерджились через Tier 1 (git), change-файл — через Tier 3 (LLM). Тести: `npm/tests/pull.test.mjs` (новий файл, 68+ зелених). Changelog: `npm/.changes/260610-1322.md` (bump: `minor`).
+
+## Update 2026-06-10
+
+**Уточнення фолбек-алгоритму reverse-delta**
+
+Порядок при non-zero FF: `git stash create` (бекап-sha) → `git reset --hard origin/<branch>` → `_n7merge_delta "origin/$branch" "$backup_ref" "origin/$branch" "локальна робота"`. Бекап-sha та команда відкату виводяться у stderr; `trap` на `INT/TERM` авто-відкочує. `stash → ff → stash pop` відхилено: переносить конфлікт у `stash pop` без багаторівневого резолву.
+
+`_n7merge_delta` розширено до 4-х параметрів: `$3`/`$4` = людські підписи (`ours_label`/`src_label`), git-операції завжди на реальних ref `$1`/`$2`.
+
+**modify-beats-delete (Tier 1)**
+
+Detektsiya: `[[ ! -f "$rel" ]] && git cat-file -e "$merge_base:$rel"`. Симетричні правила для delete-in-src і delete-in-ours. Хелпер `_n7merge_rescued` виводить банер `╭─ 💀→✅ ВРЯТОВАНО ВІД ВИДАЛЕННЯ`. Change-файл: `npm/.changes/260610-1404.md`.
+
+## Update 2026-06-10 (підтвердження smoke-тестом)
+
+Інтеграційний smoke-тест підтвердив: HEAD після pull = origin, unstaged-діфф = лише локальна робота, повторний pull → «Вже актуально» без зачіпання uncommitted змін. Причина відхилення `stash pop` підтверджена: не вирішував конфлікт, а переносив його з тим самим перетином без підтримки `_n7merge_delta`. Тести: `npm/tests/pull.test.mjs`.

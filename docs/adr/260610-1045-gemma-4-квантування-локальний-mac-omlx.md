@@ -52,3 +52,48 @@ Gemma 4 патчі включені в omlx `v0.4.3` через пін `mlx-lm@3
 `mlx-community/gemma-4-e4b-it-OptiQ-4bit` (4B, 7.5 GB, `model_type: gemma4`) обрана основною моделлю: 4/4 тестів (UA history 1654, missing dollar, sheep trap, RLE Python 6/6 unit tests), ~28 tps, вкладається у 16 GB без memory ceiling issues. `rajaschitnis/gemma-4-12b-it-text-only-4bit-mlx` — 10 tps без chunked_prefill / 4.5 tps з ним, провалила RLE (не повернула content). `Qwen3-4B-Thinking-2507-4bit` — зациклення на UA-history, проімперський наратив, wandering у reasoning.
 
 `gemma-4-12B-it-OptiQ-4bit` і `gemma-4-12B-it-qat-4bit` видалені (`DELETE /admin/api/hf/models/{name}`, ~18.5 GB вивільнено): архітектура `gemma4_unified` несумісна з omlx 0.4.3 на рівні quant-завантаження навіть після mlx-lm HEAD 0.31.3 та локального патчу `sanitize()`. mlx-lm HEAD: `pip install --upgrade --force-reinstall --no-deps "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@main"` → `mlx_lm-0.31.3`; відкат: `brew reinstall omlx`. Статичний api_key: `~/.omlx/settings.json` → `"api_key": "omlx-local-test-key"` (localhost-only); harness: `curl -H "Authorization: Bearer omlx-local-test-key"`. Тест-скрипт: `/tmp/omlx_ask.py`, endpoint `http://127.0.0.1:8000/v1/chat/completions`.
+
+## Update 2026-06-10
+
+**Вибір gemma-4-e4b-it-OptiQ-4bit як основної робочої моделі**
+
+Порівняння на 4 тестах (UA history, missing dollar, sheep trap, RLE code):
+- `mlx-community/gemma-4-e4b-it-OptiQ-4bit` (4B, 7.5 GB): 4/4, ~28 tps без chunked_prefill
+- `rajaschitnis/gemma-4-12b-it-text-only-4bit-mlx` (12B, 10.7 GB, thinking): 3/4 — двічі зависав у reasoning на RLE без результату
+- `mlx-community/gemma-4-12B-it-OptiQ-4bit` та `gemma-4-12B-it-qat-4bit`: не завантажуються (`gemma4_unified`)
+
+Обрано `gemma-4-e4b-it-OptiQ-4bit`: єдина 4/4, ~2.8× вища швидкість (28 tps vs 10 tps), вільно міститься у 16 GB без chunked_prefill.
+
+**gemma4_unified несумісність та видалення моделей**
+
+Обидві 12B повертають «Missing 711 parameters». Коміт `8239c72` (mlx-lm, 2026-06-05) додав маппінг `gemma4_unified → gemma4` у `utils.py:55`, але per-layer mixed-precision quant config (OptiQ/QAT) несумісний із `_quantize()` predicate — провалюється навіть після HEAD (0.31.3). Оновлення через `/opt/homebrew/opt/omlx/libexec/bin/pip install --force-reinstall --no-deps "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@main"`; відкат: `brew reinstall omlx`.
+
+Видалено через `DELETE /admin/api/hf/models/{model_name}` (~8.7 GB). Залишились: `gemma-4-e4b-it-OptiQ-4bit`, `rajaschitnis--gemma-4-12b-it-text-only-4bit-mlx`, `Qwen3-4B-Thinking-2507-4bit`, `MarkItDown`. Тести: `/tmp/omlx_ask.py`, `/tmp/rle_check.py`. Бекап: `~/.omlx/settings.json.bak.1781072139`.
+
+## Update 2026-06-10 (Qwen3 та multimodal E2B)
+
+**Qwen3-4B-Thinking-2507-4bit** (2.3 GB, ~42 tps, ctx 262k): зациклює відповідь на українській мові — відхилений. Transcript не містить результатів sheep trap та RLE для Qwen3.
+
+**gemma-4-e2b-it-4bit для справжнього multimodal**
+
+`gemma-4-e4b-it-OptiQ-4bit` фактично text-only: OptiQ-build стрипнув vision/audio ваги (0 ключів у safetensors попри `vision_config`/`audio_config` у `config.json`). Для повноцінного VLM обрано `mlx-community/gemma-4-e2b-it-4bit` (3.61 GB, конвертована через mlx-vlm з `google/gemma-4-e2b-it`, 67 755 завантажень). HF task ID: `d2a9bec8-d254-4f68-b3d3-953997bda29d`, ~0.70 MB/s, ETA ~80 хв. Пошук: `GET /admin/api/hf/search?q=gemma-4-e2b-it&limit=15`.
+
+Бенчмарк E4B: UA-history cold `wall=36.48s`, missing dollar `28.84 tps`, sheep trap `0.33s/1 token`. RLE: 6/6 assert у `/tmp/rle_check.py`. Конфіг: `hidden_size=2560`, 42 layers, ctx 131072.
+
+## Update 2026-06-10 (конфігурація omlx та структура ваг)
+
+**Зміни конфігурації `~/.omlx/settings.json`**
+
+`memory.memory_guard_tier: balanced → custom`, `memory.memory_guard_custom_ceiling_gb: 0 → 12`, `scheduler.chunked_prefill: false → true`, `auth.api_key: null → "omlx-local-test-key"`. Без ceiling 12 GB rajaschitnis 12B відхилялась: `projected memory 11.89 GB would exceed memory ceiling 11.84 GB`. `chunked_prefill: true` знизив throughput 12B з ~10 tps до ~4.57 tps.
+
+**Діагностика структури ваг**
+
+`gemma-4-e4b-it-OptiQ-4bit`: `model_type: gemma4`, 1355 ключів, 0 vision/audio ваг — `mlx_lm.load()` успішний. `gemma-4-12B-it-OptiQ-4bit`: `model_type: gemma4_unified`, `text_config.model_type: gemma4_unified_text`, ваги під `language_model.model.*` конфліктують із quantize predicate. `gemma-4-12B-it-qat-4bit`: 17 vision/audio ключів (`embed_audio.*`, `embed_vision.*`) + та сама помилка 711 parameters.
+
+## Update 2026-06-10 (діагностика engine_pool та admin API)
+
+`gemma-4-12B-it-qat-4bit` додатково має 17 vision/audio ключів (`embed_audio.*`, `embed_vision.*`) у safetensors — та сама помилка «Missing 711 parameters» при завантаженні через будь-який шлях (mlx-lm / mlx-vlm 0.6.2). LLM-fallback шлях у omlx: `omlx/engine_pool.py:1058–1086`. Admin API: `DELETE http://127.0.0.1:8000/admin/api/hf/models/{model_name}` підтверджено; також: `POST /admin/api/hf/download`, `GET /admin/api/hf/tasks`; авторизація через cookie `/tmp/omlx_cookie.txt`. `mlx-lm 0.31.3 HEAD` залишається у brew-venv після видалення моделей; відкат: `brew reinstall omlx`.
+
+## Update 2026-06-10 (деталі PR 8239c72)
+
+PR `8239c72` (2026-06-05): додав `MODEL_REMAPPING["gemma4_unified"] = "gemma4"` у `mlx_lm/utils.py` та `sanitize()` у `gemma4.py` — лише виявлення архітектури та стриппінг vision/audio ваг. Не вирішив: ваги `language_model.model.*` у safetensors несумісні з `_quantize()` predicate при per-layer mixed-precision quant (OptiQ/QAT). Файл після HEAD-інсталяції: `/opt/homebrew/Cellar/omlx/0.4.3/libexec/lib/python3.11/site-packages/mlx_lm/__init__.py` (mtime: Jun 10 13:54:38 2026). E4B підтверджено: `model_type: gemma4` (не `unified`), 1355 ключів, `mlx_lm.load()` → `E4B SUCCESS`.
