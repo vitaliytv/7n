@@ -1,5 +1,5 @@
-import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { stdout } from 'node:process'
 
@@ -278,17 +278,52 @@ function gitContext() {
 }
 
 /**
- * Запускає `npx @nitra/cursor <args>` зі спадковим stdio й резолвить exit-код.
- * @param {string[]} args аргументи після `@nitra/cursor`
- * @param {string} [cwd] робоча тека (корінь репо)
+ * Записує change-файл у `<cwd>/<ws>/.changes/YYMMDD-HHMM.md`, парсячи аргументи
+ * формату `['change', '--bump', X, '--section', Y, '--message', M, '--ws', W?]`.
+ * При колізії імені атомарно додає суфікс `-2`, `-3` тощо.
+ * @param {string[]} args аргументи у форматі buildChangeArgs
+ * @param {string} [cwd] корінь репо
  * @returns {Promise<number>} exit code
  */
-function spawnCanon(args, cwd) {
-  return new Promise(resolve => {
-    const child = spawn('npx', ['@nitra/cursor', ...args], { stdio: 'inherit', cwd })
-    child.on('error', () => resolve(1))
-    child.on('close', code => resolve(code ?? 1))
-  })
+function writeChangeFile(args, cwd = '.') {
+  try {
+    const get = flag => {
+      const i = args.indexOf(flag)
+      return i !== -1 && i + 1 < args.length ? args[i + 1] : undefined
+    }
+    const bump = get('--bump') ?? 'minor'
+    const section = get('--section') ?? 'Changed'
+    const message = get('--message')
+    const ws = get('--ws')
+
+    if (!message) {
+      process.stderr.write('❌ writeChangeFile: no --message\n')
+      return Promise.resolve(1)
+    }
+
+    const dir = ws ? join(cwd, ws, '.changes') : join(cwd, '.changes')
+    mkdirSync(dir, { recursive: true })
+
+    const now = new Date()
+    const pad = n => String(n).padStart(2, '0')
+    const yy = String(now.getFullYear()).slice(-2)
+    const mo = pad(now.getMonth() + 1)
+    const dd = pad(now.getDate())
+    const hh = pad(now.getHours())
+    const mn = pad(now.getMinutes())
+    const base = `${yy}${mo}${dd}-${hh}${mn}`
+
+    let filename = `${base}.md`
+    let counter = 2
+    while (existsSync(join(dir, filename))) filename = `${base}-${counter++}.md`
+
+    writeFileSync(join(dir, filename), `---\nbump: ${bump}\nsection: ${section}\n---\n${message}\n`, 'utf8')
+    stdout.write(`✅ ${ws ? `${ws}/` : ''}.changes/${filename}\n`)
+    return Promise.resolve(0)
+  } catch (error) {
+    process.stderr.write(`❌ writeChangeFile: ${error instanceof Error ? error.message : String(error)}\n`)
+    return Promise.resolve(1)
+  }
 }
 
 /**
@@ -305,7 +340,7 @@ function spawnCanon(args, cwd) {
  */
 export async function runCh(argv, io = {}) {
   const log = io.log ?? (message => stdout.write(`${message}\n`))
-  const run = io.run ?? spawnCanon
+  const run = io.run ?? writeChangeFile
   const partial = parseChArgs(argv)
   const provided = partial.message
   if (provided !== undefined && provided.trim() === '') {
