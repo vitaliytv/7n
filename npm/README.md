@@ -13,7 +13,6 @@ npm i -g @7n/n
 ## Використання
 
 ```bash
-npx @7n/n greet "світ"   # Привіт, світ!
 npx @7n/n --version
 npx @7n/n --help
 ```
