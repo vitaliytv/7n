@@ -19,12 +19,14 @@
     "coverage": "n-cursor coverage"
   },
   "devDependencies": {
-    "@nitra/cspell-dict": "^2.1.0",
     "@7n/rules": "^1.30.0",
-    "@nitra/eslint-config": "^3.10.1",
+    "@7n/rules-ci-github": "^1.7.1",
+    "@7n/rules-lang-js": "^0.5.0",
+    "@nitra/cspell-dict": "^2.2.2",
+    "@nitra/eslint-config": "^3.10.3",
     "@stryker-mutator/vitest-runner": "^9.6.1",
-    "@vitest/coverage-v8": "^4.1.7",
-    "vitest": "^4.1.7"
+    "@vitest/coverage-v8": "^4.1.10",
+    "vitest": "^4.1.10"
   },
   "engines": {
     "bun": ">=1.3",
