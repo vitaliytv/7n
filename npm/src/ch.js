@@ -12,8 +12,14 @@ import { ensureModel, loadOmlxConfig, omlxChat } from './omlx.mjs'
 // Цілі — ЛИШЕ підпакети з кореневого `workspaces` (їхні `.changes/` веде CHANGELOG); корінь
 // монорепо `n-changelog` не агрегує, тож кореневі/`docs/` файли пропускаємо (orphans). Якщо
 // підпакетів немає (однопакетне репо) — корінь сам є пакетом і стає ціллю.
-// `--message` ОПЦІЙНИЙ: якщо не задано — для КОЖНОГО воркспейса генерує опис локально через
-// omlx (OpenAI-сумісний MLX-сервер) з його diff, тобто аналізує зміни по воркспейсах окремо.
+// `--path <шлях>` ЗВУЖУЄ автодетект до ОДНОГО воркспейса-власника цього шляху: решта
+// зачеплених воркспейсів (навіть із власними незакомічені змінами) пропускається — це
+// свідомий escape-hatch на випадок, коли в дереві одночасно «брудні» кілька непов'язаних
+// воркспейсів і треба записати change лише в один із них.
+// `--message` ОПЦІЙНИЙ: якщо не задано — для КОЖНОГО воркспейса (що лишився після --path)
+// генерує опис локально через omlx (OpenAI-сумісний MLX-сервер) з його diff, тобто аналізує
+// зміни по воркспейсах окремо; якщо задано — той самий текст іде в КОЖЕН зачеплений воркспейс
+// (тому без --path і з декількома «брудними» воркспейсами явний --message «розмножується»).
 // Шумні шляхи (docs/.changes/lock/*.jsonl/.n-cursor/…) і ліміти обрізання — спільні з push через
 // diff-context.js, щоб набори не розходились.
 // Сам запис change-файлу (ім'я YYMMDD-HHMM, анти-колізія, серіалізація) делегується каноном
@@ -26,24 +32,25 @@ const DEFAULT_BUMP = 'minor'
 const DEFAULT_SECTION = 'Changed'
 
 const USAGE = [
-  'Використання: npx @7n/n ch [--message "<опис>"] [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>]',
+  'Використання: npx @7n/n ch [--message "<опис>"] [--bump <major|minor|patch>] [--section <Added|Changed|Fixed|Removed>] [--path <шлях>]',
   `Без флага --bump → ${DEFAULT_BUMP}; без --section → ${DEFAULT_SECTION}.`,
   'Цілі — підпакети-воркспейси, зачеплені змінами git (окремий change-файл у кожен). Кореневі/docs-файли поза воркспейсами пропускаються (CHANGELOG для них не ведеться).',
+  '--path <шлях> звужує ціль до ОДНОГО воркспейса, що володіє цим шляхом — решта зачеплених воркспейсів пропускається (навіть якщо вони теж мають незакомічені зміни).',
   'Без --message опис кожного воркспейса генерується локально через omlx з його diff.',
   'Запис делегується npx @nitra/cursor change.'
 ].join('\n')
 
 /**
- * Парсить `--bump/--section/--message` з argv (без валідації значень).
+ * Парсить `--bump/--section/--message/--path` з argv (без валідації значень).
  * @param {string[]} argv аргументи після `ch`
- * @returns {{ bump?: string, section?: string, message?: string }} зібрані поля
+ * @returns {{ bump?: string, section?: string, message?: string, path?: string }} зібрані поля
  */
 export function parseChArgs(argv) {
   const get = flag => {
     const i = argv.indexOf(flag)
     return i !== -1 && i + 1 < argv.length ? argv[i + 1] : undefined
   }
-  return { bump: get('--bump'), section: get('--section'), message: get('--message') }
+  return { bump: get('--bump'), section: get('--section'), message: get('--message'), path: get('--path') }
 }
 
 /**
@@ -163,6 +170,21 @@ export function planChanges(changedPaths, workspaces) {
     .map(([ws, files]) => ({ ws, files }))
     .sort((a, b) => a.ws.localeCompare(b.ws))
   return { groups, orphans }
+}
+
+/**
+ * Резолвить, який воркспейс володіє шляхом з `--path` — та сама логіка «найдовший префікс
+ * виграє», що й у `planChanges`. Якщо жоден воркспейс не покриває шлях (наприклад, шлях сам є
+ * ім'ям воркспейса поза списком, або підпакетів немає), повертає нормалізований шлях як є —
+ * тоді фільтр у `runCh` просто не знайде відповідної групи й поверне явну помилку.
+ * @param {string} path шлях з `--path` (відносно кореня репо)
+ * @param {string[]} workspaces підпакети-воркспейси
+ * @returns {string} воркспейс-власник (posix, відносно кореня)
+ */
+export function resolveWorkspaceForPath(path, workspaces) {
+  const norm = path.replace(/\\/g, '/').replace(/\/+$/, '')
+  const byLen = [...workspaces].sort((a, b) => b.length - a.length)
+  return byLen.find(w => norm === w || norm.startsWith(`${w}/`)) ?? norm
 }
 
 /**
@@ -356,7 +378,7 @@ export async function runCh(argv, io = {}) {
     return 1
   }
 
-  const { groups, orphans } = planChanges(ctx.changed, ctx.workspaces)
+  let { groups, orphans } = planChanges(ctx.changed, ctx.workspaces)
 
   if (orphans.length) {
     log(
@@ -364,6 +386,19 @@ export async function runCh(argv, io = {}) {
         orphans.length > 5 ? ` … +${orphans.length - 5}` : ''
       }`
     )
+  }
+
+  if (partial.path) {
+    const targetWs = resolveWorkspaceForPath(partial.path, ctx.workspaces)
+    const skipped = groups.filter(g => g.ws !== targetWs).map(g => (g.ws === '.' ? '<корінь>' : g.ws))
+    groups = groups.filter(g => g.ws === targetWs)
+    if (groups.length === 0) {
+      log(
+        `❌ Немає змін у воркспейсі за --path ${partial.path} (${targetWs === '.' ? '<корінь>' : targetWs}) — нічого не створено.`
+      )
+      return 1
+    }
+    if (skipped.length) log(`↪️ --path звужує до ${targetWs === '.' ? '<корінь>' : targetWs}, пропускаю: ${skipped.join(', ')}`)
   }
 
   if (groups.length === 0) {
