@@ -7,6 +7,7 @@ import {
   parseChArgs,
   parsePorcelainZ,
   planChanges,
+  resolveWorkspaceForPath,
   runCh,
   workspaceDiffContext
 } from '../src/ch.js'
@@ -55,12 +56,47 @@ describe('parseChArgs', () => {
     expect(parseChArgs(['--bump', 'minor', '--section', 'Added', '--message', 'x'])).toEqual({
       bump: 'minor',
       section: 'Added',
-      message: 'x'
+      message: 'x',
+      path: undefined
     })
   })
 
   it('без --message → message undefined', () => {
-    expect(parseChArgs(['--bump', 'patch'])).toEqual({ bump: 'patch', section: undefined, message: undefined })
+    expect(parseChArgs(['--bump', 'patch'])).toEqual({
+      bump: 'patch',
+      section: undefined,
+      message: undefined,
+      path: undefined
+    })
+  })
+
+  it('збирає --path', () => {
+    expect(parseChArgs(['--path', 'plugins/ci-github'])).toEqual({
+      bump: undefined,
+      section: undefined,
+      message: undefined,
+      path: 'plugins/ci-github'
+    })
+  })
+})
+
+describe('resolveWorkspaceForPath', () => {
+  it('шлях під воркспейсом → цей воркспейс', () => {
+    expect(resolveWorkspaceForPath('plugins/ci-github/src/x.js', ['plugins/ci-github', 'npm'])).toBe(
+      'plugins/ci-github'
+    )
+  })
+
+  it('шлях == воркспейс → той самий', () => {
+    expect(resolveWorkspaceForPath('npm', ['plugins/ci-github', 'npm'])).toBe('npm')
+  })
+
+  it('вкладені воркспейси → найдовший префікс виграє', () => {
+    expect(resolveWorkspaceForPath('packages/a/x.js', ['packages/a', 'packages'])).toBe('packages/a')
+  })
+
+  it('шлях поза жодним воркспейсом → повертає нормалізований шлях як є', () => {
+    expect(resolveWorkspaceForPath('docs/x.md', ['npm'])).toBe('docs/x.md')
   })
 })
 
@@ -255,6 +291,44 @@ describe('runCh — з --message', () => {
     expect(spy.calls).toEqual([])
     expect(io.lines.join('\n')).toContain('Поза воркспейсами')
     expect(io.lines.join('\n')).toContain('Немає змін у воркспейсах')
+  })
+
+  it('--path звужує до ОДНОГО воркспейса навіть коли «брудні» кілька (репро бага: ch мав писати всюди)', async () => {
+    const io = collector()
+    const spy = runnerSpy(0)
+    const code = await runCh(['--message', 'ci-github fix', '--path', 'plugins/ci-github'], {
+      log: io.log,
+      run: spy.run,
+      context: ctx(
+        ['npm/x.js', 'plugins/ci-github/y.yml', 'plugins/lang-rust/z.rs'],
+        ['npm', 'plugins/ci-github', 'plugins/lang-rust']
+      )
+    })
+    expect(code).toBe(0)
+    expect(spy.calls.length).toBe(1)
+    expect(spy.calls[0].args).toEqual([
+      'change',
+      '--bump',
+      'minor',
+      '--section',
+      'Changed',
+      '--message',
+      'ci-github fix',
+      '--ws',
+      'plugins/ci-github'
+    ])
+    expect(io.lines.join('\n')).toContain('пропускаю: npm, plugins/lang-rust')
+  })
+
+  it('--path без відповідних змін у цільовому воркспейсі → 1, канон не викликається', async () => {
+    const spy = runnerSpy(0)
+    const code = await runCh(['--message', 'опис', '--path', 'plugins/ci-github'], {
+      log: collector().log,
+      run: spy.run,
+      context: ctx(['npm/x.js'], ['npm', 'plugins/ci-github'])
+    })
+    expect(code).toBe(1)
+    expect(spy.calls).toEqual([])
   })
 
   it('однопакетне репо (без workspaces) → пише в корінь `.` без --ws', async () => {
